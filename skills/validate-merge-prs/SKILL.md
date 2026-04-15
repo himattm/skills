@@ -72,3 +72,48 @@ Check the dependency graph for cycles. If found:
 - Flag all PRs in the cycle as errored
 - Exclude them from the merge plan
 - Report the cycle: "Dependency cycle detected: #A → #B → #C → #A"
+
+## Phase 2: Parallel Validation
+
+Dispatch one sub-agent per PR to validate it. All PRs validate concurrently — validation happens on each PR's own branch and doesn't require merge order.
+
+### 4. Dispatch Validation Agents
+
+For each PR, spawn a sub-agent (via Agent tool) with this prompt template:
+
+```
+You are validating PR #<number> (<title>) on branch <headRefName>.
+
+1. Check out the branch: git checkout <headRefName>
+2. Run /review-cycle <number>
+3. After review-cycle completes, check current status:
+   - gh pr view <number> --json statusCheckRollup,reviewDecision,mergeable
+4. Report back with:
+   - PASS or FAIL
+   - What review-cycle fixed (if anything)
+   - What remains broken (if anything)
+   - Current CI status (passing/failing/pending)
+   - Current review status (approved/changes_requested/review_required/none)
+   - Mergeable state (mergeable/conflicting/unknown)
+```
+
+**Parallelism:** Launch all validation agents simultaneously using multiple Agent tool calls in a single message. Use `run_in_background: true` for each agent.
+
+**Wait for all agents to complete** before proceeding to Phase 3.
+
+### 5. Classify Results
+
+After all validation agents report back, classify each PR:
+
+**Ready to merge:**
+- CI passing (all required status checks green)
+- At least one approving review (or reviews not required per repo settings)
+- No merge conflicts with base branch
+- review-cycle completed without unresolved issues
+
+**Blocked (with reason):**
+- CI failing after review-cycle exhausted its iterations → `"CI failing: <failure summary>"`
+- Missing required review approvals → `"Missing required review approval"`
+- Merge conflicts → `"Merge conflict with base branch"`
+- Draft PR → `"PR is in draft status"`
+- Depends on a blocked PR → `"Blocked by #<number> which is also blocked"`
