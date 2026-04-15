@@ -165,3 +165,66 @@ Detected: <squash|merge|rebase> (based on repo history)
 **ASK THE USER:** "This is the proposed merge plan. Approve to proceed, or tell me what to adjust."
 
 **DO NOT merge anything until the user explicitly approves.** This gate is non-negotiable.
+
+## Phase 4: Merge Execution
+
+Triggered only after the user approves the merge plan.
+
+### 9. Sequential Merge
+
+For each PR in the computed merge order:
+
+**a. Pre-merge re-check:**
+
+```bash
+gh pr view <number> --json statusCheckRollup,reviewDecision,mergeable
+```
+
+Verify CI is still passing, reviews are still approved, and PR is still mergeable. If any check fails, skip this PR and report why — do not merge stale PRs.
+
+**b. Merge:**
+
+```bash
+gh pr merge <number> --<method> --delete-branch
+```
+
+Where `<method>` is the detected merge method from step 7.
+
+**c. Rebase downstream PRs:**
+
+If any queued PR had its `baseRefName` pointing at the just-merged branch:
+
+```bash
+gh pr edit <downstream-number> --base <default-branch>
+```
+
+The downstream PR's CI will re-run automatically after the base change.
+
+**d. Continue** to the next PR in the merge order.
+
+### 10. Failure Handling
+
+If a merge fails:
+- **Stop the affected dependency chain** — do not merge any PR that depends on the failed one
+- **Continue with independent PRs** — PRs with no dependency on the failed one can still merge
+- After all possible merges are attempted, present a final status report
+
+### 11. Final Report
+
+After all merges complete (or fail), present:
+
+```
+## Merge Results
+
+### Successfully Merged
+- #<number> - <title> ✓
+
+### Failed
+- #<number> - <title> — <failure reason>
+
+### Skipped (dependency on failed PR)
+- #<number> - <title> — blocked by #<failed-number>
+
+### Still Blocked (from Phase 2)
+- #<number> - <title> — <original block reason>
+```
