@@ -246,7 +246,6 @@ After all merges complete (or fail), present:
 - **Re-check before every merge.** CI and review status can change between validation and merge. Always verify immediately before merging.
 - **Stop the chain on failure.** If PR #42 fails to merge, do not merge #45 that depends on it. Independent PRs can still proceed.
 - **Skip draft PRs.** Flag them as blocked — they are not ready for merge.
-- **Continue independent PRs on failure.** If a dependency chain is halted, independent PRs can still merge. Maximize progress.
 - **Delete branches after merge.** Use `--delete-branch` to clean up merged branches consistently.
 - **Detect cycles.** If the dependency graph has a cycle, exclude those PRs and report the cycle rather than entering an infinite loop.
 
