@@ -33,3 +33,42 @@ digraph validate_merge {
     merge -> done;
 }
 ```
+
+## Phase 1: Discovery & Dependency Analysis
+
+### 1. Discover Open PRs
+
+```bash
+gh pr list --author @me --state open --json number,title,headRefName,baseRefName,url,reviewDecision,statusCheckRollup,mergeable,body,isDraft,createdAt
+```
+
+If zero PRs are found, report "No open PRs found" and stop.
+
+Print a summary table of discovered PRs before continuing:
+
+```
+| # | Title | Branch | Base | CI | Reviews | Draft |
+```
+
+### 2. Build Dependency Graph
+
+Construct a directed "must merge before" graph from three signal sources:
+
+**Branch topology (hard dependency):** If PR-A's `headRefName` equals PR-B's `baseRefName`, A must merge before B.
+
+**PR metadata (hard dependency):** Scan each PR's body and title for patterns: `depends on #N`, `after #N`, `blocks #N`, `requires #N`. These create directed edges.
+
+**File overlap (soft signal):** For each PR pair, compare changed files:
+
+```bash
+gh pr diff <number> --name-only
+```
+
+Compute pairwise file intersections. Overlapping files don't create hard dependencies — they inform merge ordering as a tie-breaker.
+
+### 3. Cycle Detection
+
+Check the dependency graph for cycles. If found:
+- Flag all PRs in the cycle as errored
+- Exclude them from the merge plan
+- Report the cycle: "Dependency cycle detected: #A → #B → #C → #A"
