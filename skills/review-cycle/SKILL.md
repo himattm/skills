@@ -60,7 +60,7 @@ Analyze what's changing — which files, what domains are touched (API routes, d
 **Selecting specialist domains:**
 - Pick domains where deep focused attention adds value for this specific diff (e.g., "security", "performance", "input validation", "error handling", "accessibility", "correctness", "data integrity")
 - Each specialist should cover something the others won't — avoid overlapping mandates
-- Scale the number of agents to the PR's complexity — a one-file typo fix needs fewer specialists than a PR touching auth middleware across 20 files
+- Scale the number of agents to the PR's complexity — typically 2-4 specialists for most PRs, rarely more than 5. A one-file typo fix needs fewer specialists than a PR touching auth middleware across 20 files
 - There is no fixed menu — use your judgment based on what the diff actually contains
 
 **Write a focused prompt for each specialist** that includes:
@@ -72,7 +72,7 @@ Analyze what's changing — which files, what domains are touched (API routes, d
 
 ### 3. Parallel Specialist Reviews
 
-Spawn all specialist agents in parallel. Each agent is an **opus** agent that:
+Spawn all specialist agents in parallel. Each specialist fetches the diff independently rather than receiving it in its prompt — this avoids prompt size limits on large PRs. Each agent is an **opus** agent that:
 
 1. Fetches the PR diff via `gh pr diff <number>`
 2. Reviews the entire diff exclusively through its assigned lens
@@ -88,7 +88,7 @@ Spawn all specialist agents in parallel. Each agent is an **opus** agent that:
 - **[file:line]** — Observation (no fix needed)
 ```
 
-**Specialist constraints:**
+**Include these constraints in each specialist's prompt:**
 - Stay in your lane — a security agent should not flag naming conventions, a performance agent should not suggest style changes
 - Be specific — cite file paths, line numbers, and what's wrong
 - Actionable means "fix before merge"; informational means "be aware"
@@ -99,7 +99,7 @@ Spawn all specialist agents in parallel. Each agent is an **opus** agent that:
 After all specialist agents return:
 
 1. **Merge** all findings into a single list
-2. **Deduplicate** — if two agents flag the same location for related reasons (e.g., security agent flags unsanitized input, validation agent flags missing input check on the same line), combine into one finding with the stronger rationale
+2. **Deduplicate** — if two agents flag the same location for related reasons (e.g., security agent flags unsanitized input, validation agent flags missing input check on the same line), combine into one finding that preserves rationales from both agents, keeping the most severe categorization
 3. **Triage** the merged list:
 
 - **Fix** — genuine issues worth addressing
@@ -156,7 +156,7 @@ Stage only the files that were changed. Write a concise commit message summarizi
 
 ### 8. Loop or Stop
 
-- If iteration count < **5** (safety cap), go back to step 2. Re-read the full PR diff holistically (including all changes from prior rounds), re-analyze which specialist domains are relevant, and spawn fresh specialist agents. The diff and the domains may change between rounds — a fix in one area can introduce issues in another.
+- If iteration count < **5** (safety cap), go back to step 2 with a fresh analysis. Fixes in one area can introduce issues in another, so the specialist mix may change between rounds.
 - If at the cap, stop and report any remaining items to the user.
 
 The loop should converge quickly — most PRs are clean after 2-3 rounds.
@@ -170,8 +170,7 @@ The loop should converge quickly — most PRs are clean after 2-3 rounds.
 | Parallel specialist execution | All specialists run concurrently — each gets the full diff but reviews through a single focused lens. Faster than sequential. |
 | Merged findings, single triage | All specialist output is combined and deduplicated before triaging once. Avoids duplicate fixes when two agents flag the same code. |
 | Full re-selection each round | Every iteration re-analyzes the full current diff and re-picks specialists. Fixes in one domain may introduce issues in another. |
-| Holistic view per round | Each round looks at the complete PR diff including all prior changes, not just the delta. |
-| Fresh context each round | Prevents anchoring on prior findings — reviews the actual current diff |
+| Fresh holistic view each round | Each round re-reads the complete PR diff (including all prior changes), preventing anchoring on prior findings |
 | Parallel fix agents | Independent changes don't need to wait for each other |
 | Build gate before push | Never push code that doesn't compile |
 | Max 5 iterations | Prevents infinite loops if review keeps finding new things from its own fixes |
@@ -183,7 +182,7 @@ The loop should converge quickly — most PRs are clean after 2-3 rounds.
 |---------|-----|
 | Unquoted paths with parens in shell | Always double-quote paths containing `(` or `)` in git/bash commands |
 | Pushing without build verification | Always run the build after fixes, before pushing |
-| Re-reviewing without pushing first | The review agent reads `gh pr diff` — changes must be pushed to be visible |
+| Re-reviewing without pushing first | The specialist agents read `gh pr diff` — changes must be pushed to be visible to the next round's agents |
 | Passing prior review context to new agent | Fresh agent = fresh context. Only pass "what was fixed" summary, not the old findings |
 | Fixing informational/style items | Only fix actionable issues — style preferences create unnecessary churn |
 | Overlapping specialist mandates | Each specialist should have a distinct domain — if two agents both flag style issues, the mandates overlap. One agent per concern. |
