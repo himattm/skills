@@ -228,3 +228,34 @@ After all merges complete (or fail), present:
 ### Still Blocked (from Phase 2)
 - #<number> - <title> — <original block reason>
 ```
+
+## Key Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Single invocation | One skill does discovery through merge | User wants full automation, not multi-step manual process |
+| Parallel validation | Sub-agent per PR via Agent tool | PRs validate independently on their own branches |
+| Topo sort + overlap | Dependency-aware merge ordering | Handles stacked branches and minimizes rebase conflicts |
+| Merge method auto-detect | Inspect recent git history | Consistent with existing project conventions |
+| Batch blocker reporting | One report at the end | User wants a coherent picture, not interruptions |
+| Approval gate before merge | Present plan, wait for explicit approval | Autonomous validation but human-approved merging |
+
+## Safety Rails
+
+- **Never force-push.** If a rebase is needed, use `gh pr edit --base` to retarget the PR. Let CI re-run naturally.
+- **Re-check before every merge.** CI and review status can change between validation and merge. Always verify immediately before merging.
+- **Stop the chain on failure.** If PR #42 fails to merge, do not merge #45 that depends on it. Independent PRs can still proceed.
+- **Skip draft PRs.** Flag them as blocked — they are not ready for merge.
+- **Detect cycles.** If the dependency graph has a cycle, exclude those PRs and report the cycle rather than entering an infinite loop.
+
+## Common Mistakes
+
+| Mistake | Fix |
+|---------|-----|
+| Merging without user approval | The hard gate at step 8 is non-negotiable — always wait for explicit approval |
+| Merging in wrong order | Always follow the computed topological sort — never skip ahead |
+| Force-pushing during rebase | Use `gh pr edit --base` to retarget, never force-push |
+| Ignoring draft PRs | Draft PRs must be flagged as blocked, not validated and merged |
+| Trusting stale CI results | Always re-check `statusCheckRollup` and `reviewDecision` immediately before merging |
+| Continuing a dependency chain after failure | If a parent PR fails, all downstream PRs in that chain must be skipped |
+| Merging PRs that are in a cycle | Exclude cyclic PRs and report the cycle to the user |
