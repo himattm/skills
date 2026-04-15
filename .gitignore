@@ -9,6 +9,9 @@ Thumbs.db
 *.swo
 *~
 
+# Docs
+docs/
+
 # Environment
 .env
 .env.local
