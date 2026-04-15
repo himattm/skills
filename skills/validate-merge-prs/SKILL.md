@@ -117,3 +117,51 @@ After all validation agents report back, classify each PR:
 - Merge conflicts → `"Merge conflict with base branch"`
 - Draft PR → `"PR is in draft status"`
 - Depends on a blocked PR → `"Blocked by #<number> which is also blocked"`
+
+## Phase 3: Merge Plan & Report
+
+### 6. Compute Merge Order
+
+For all "ready" PRs, compute the merge order:
+
+1. **Topological sort** on the dependency graph — hard dependencies determine base ordering
+2. **File overlap tie-break** — among PRs at the same topological level, merge those that share files with later PRs first (so later PRs can rebase cleanly)
+3. **Final tie-break** — oldest PR first (by `createdAt`)
+
+### 7. Detect Merge Method
+
+Auto-detect the repo's merge convention:
+
+```bash
+git log --merges --oneline -20 <default-branch>
+```
+
+- If most recent merges show "Squash" pattern → use `--squash`
+- If most recent merges show standard merge commits → use `--merge`
+- If no merge commits found (linear history) → use `--rebase`
+- If unable to determine → ask the user
+
+### 8. Present Report — HARD GATE
+
+Present the full report in this format:
+
+```
+## PR Queue Status
+
+### Ready to Merge (in order)
+1. #<number> - <title> (base: <baseRefName>) — CI: <status>, Reviews: <count> approved
+   ↳ depends on #<dep>, will rebase after merge  [only if applicable]
+
+### Blocked (needs attention)
+- #<number> - <title> — <block reason>
+
+### Merge Order Rationale
+- #X before #Y: <reason>
+
+### Merge Method
+Detected: <squash|merge|rebase> (based on repo history)
+```
+
+**ASK THE USER:** "This is the proposed merge plan. Approve to proceed, or tell me what to adjust."
+
+**DO NOT merge anything until the user explicitly approves.** This gate is non-negotiable.
