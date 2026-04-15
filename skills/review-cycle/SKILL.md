@@ -76,7 +76,7 @@ Group fixes by independence:
 Each implementation agent prompt must include:
 - Exact file paths and line numbers
 - What to change and why
-- The project's build command for verification
+- The build command to use for verification (see step 5 for detection)
 - Instruction to actually execute (not just plan)
 
 **Shell quoting**: Paths with parentheses (e.g., `(auth)`, `(dashboard)`) must be double-quoted in git and bash commands:
@@ -91,11 +91,21 @@ git diff -- "apps/web/src/app/(auth)/callback/route.ts"
 
 ### 5. Build Verification
 
-After all fix agents complete, verify the build passes:
+After all fix agents complete, verify the build passes. Detect the project's build system and run the appropriate command:
 
-```bash
-pnpm turbo build --filter=<package>
-```
+| Indicator | Build command |
+|-----------|--------------|
+| `Makefile` | `make build` (or `make` if no build target) |
+| `Cargo.toml` | `cargo build` |
+| `go.mod` | `go build ./...` |
+| `build.gradle` / `build.gradle.kts` | `./gradlew build` |
+| `pom.xml` | `mvn compile` |
+| `package.json` with `build` script | Use the repo's package manager (`npm run build`, `pnpm build`, `yarn build`, `bun run build`) |
+| `turbo.json` | Prefer `turbo build` scoped to affected packages |
+| `CMakeLists.txt` | `cmake --build build` |
+| None of the above | Check CLAUDE.md or project docs for build instructions; if nothing found, skip build verification and warn the user |
+
+If multiple build systems are present, prefer the one closest to the changed files. When in doubt, check the repo's CLAUDE.md or contributing docs for the canonical build command.
 
 If the build fails, fix the errors before proceeding. Do not push broken code.
 
