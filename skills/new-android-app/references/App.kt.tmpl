@@ -14,18 +14,11 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         installLogging()
-        installCrashlyticsIfConfigured()
         graph = createGraphFactory<AppGraph.Factory>().create(this)
     }
 
     private fun installLogging() {
         Logger.setLogWriters(platformLogWriter())
         Logger.setTag("{{appName}}")
-    }
-
-    private fun installCrashlyticsIfConfigured() {
-        // Crashlytics auto-initializes via FirebaseInitProvider when google-services.json
-        // is present at build time. The plugin's classpath is only on the build when
-        // the file exists, so no runtime guard is needed here.
     }
 }

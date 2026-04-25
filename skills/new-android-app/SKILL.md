@@ -206,3 +206,4 @@ Print to the user:
 - **Gradle smoke build fails:** print failing task + last 50 lines, stop without committing. Leave the partial scaffold for inspection.
 - **`git init` fails:** scaffold is complete; warn and continue.
 - **Package name regex fails:** prompt again rather than generating a half-broken project.
+- **`ln -s` fails (Windows or restricted FS):** create `CLAUDE.md` as a regular copy of `AGENTS.md` instead. Document in the user's report that they should re-create the symlink (or maintain copies) on platforms that don't allow user symlinks.

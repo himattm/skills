@@ -1,11 +1,7 @@
 import com.android.build.gradle.internal.dsl.BaseAppModuleExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.artifacts.VersionCatalogsExtension
-import org.gradle.api.plugins.JavaPluginExtension
-import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.kotlin.dsl.configure
-import org.gradle.kotlin.dsl.getByType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
 
@@ -16,8 +12,6 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
             apply("org.jetbrains.kotlin.android")
             apply("org.jetbrains.kotlin.plugin.parcelize")
         }
-
-        val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
 
         extensions.configure<BaseAppModuleExtension> {
             compileSdk = 35
@@ -52,10 +46,6 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
         extensions.configure<KotlinAndroidProjectExtension> {
             jvmToolchain(21)
             compilerOptions.jvmTarget.set(JvmTarget.JVM_21)
-        }
-
-        extensions.configure<JavaPluginExtension> {
-            toolchain.languageVersion.set(JavaLanguageVersion.of(21))
         }
     }
 }

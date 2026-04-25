@@ -30,12 +30,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    signingConfigs {
-        getByName("debug") {
-            // default debug signing
-        }
-    }
-
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -67,7 +61,6 @@ dependencies {
         implementation(platform(libs.firebase.bom))
         implementation(libs.firebase.crashlytics)
         implementation(libs.firebase.analytics)
-        implementation(libs.kermit.crashlytics)
     }
 
     implementation(libs.ktor.client.core)

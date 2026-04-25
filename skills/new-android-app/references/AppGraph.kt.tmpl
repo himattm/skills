@@ -1,6 +1,10 @@
 package {{packageName}}.di
 
 import android.app.Application
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.preferencesDataStoreFile
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.DependencyGraph
 import dev.zacsweers.metro.Provides
@@ -21,6 +25,7 @@ interface AppGraph {
     val httpClient: HttpClient
     val imageLoader: ImageLoader
     val json: Json
+    val dataStore: DataStore<Preferences>
 
     @DependencyGraph.Factory
     fun interface Factory {
@@ -50,4 +55,10 @@ interface AppGraph {
         .components { add(KtorNetworkFetcherFactory(httpClient)) }
         .crossfade(true)
         .build()
+
+    @Provides
+    fun provideDataStore(application: Application): DataStore<Preferences> =
+        PreferenceDataStoreFactory.create(
+            produceFile = { application.preferencesDataStoreFile("settings") },
+        )
 }

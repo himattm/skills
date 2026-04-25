@@ -1,16 +1,10 @@
 package {{packageName}}.circuit
 
-import androidx.compose.runtime.staticCompositionLocalOf
 import com.slack.circuit.foundation.Circuit
-import {{packageName}}.di.AppGraph
 import {{packageName}}.nav.RootPresenterFactory
 import {{packageName}}.nav.RootUiFactory
 
-val LocalCircuit = staticCompositionLocalOf<Circuit> {
-    error("Circuit not initialized")
-}
-
-fun buildCircuit(graph: AppGraph): Circuit = Circuit.Builder()
+fun buildCircuit(): Circuit = Circuit.Builder()
     .addPresenterFactory(RootPresenterFactory())
     .addUiFactory(RootUiFactory())
     .build()

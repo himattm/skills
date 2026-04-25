@@ -4,12 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.remember
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.slack.circuit.backstack.rememberSaveableBackStack
+import com.slack.circuit.foundation.CircuitCompositionLocals
 import com.slack.circuit.foundation.NavigableCircuitContent
 import com.slack.circuit.foundation.rememberCircuitNavigator
-import {{packageName}}.circuit.LocalCircuit
 import {{packageName}}.circuit.buildCircuit
 import {{packageName}}.nav.RootScreen
 import {{packageName}}.ui.theme.AppTheme
@@ -20,14 +19,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        val app = application as App
-        val circuit = buildCircuit(app.graph)
+        val circuit = buildCircuit()
 
         setContent {
             AppTheme {
                 val backStack = rememberSaveableBackStack(root = RootScreen)
                 val navigator = rememberCircuitNavigator(backStack) { finish() }
-                androidx.compose.runtime.CompositionLocalProvider(LocalCircuit provides circuit) {
+                CircuitCompositionLocals(circuit) {
                     NavigableCircuitContent(
                         navigator = navigator,
                         backStack = backStack,
