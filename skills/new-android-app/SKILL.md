@@ -132,7 +132,17 @@ For each entry below, copy the file from `references/` to its target path, subst
 <style name="Theme.{{appName}}.Splash" parent="android:Theme.Material.Light.NoActionBar" />
 ```
 
-After all files are written, delete any leftover sources from the `android create` template that conflict with the new structure (most commonly `app/src/main/java/...` if the template generated under `java/` instead of `kotlin/`, and any default `MainActivity.kt` not under `{{packagePath}}/`).
+After all files are written, delete every leftover source the `android create` template generated. The defaults conflict with the new structure (e.g. `com.example.<app>.MainScreenViewModelTest` referencing classes that no longer exist). Run:
+
+```bash
+# Drop default sources outside our package. Use `find` with `! -path` so the new files we just wrote are kept.
+find "$APP_DIR/app/src/main/java"   -mindepth 1 -delete 2>/dev/null || true
+find "$APP_DIR/app/src/main/kotlin" -mindepth 1 ! -path "$APP_DIR/app/src/main/kotlin/$PKG_PATH*" -delete 2>/dev/null || true
+find "$APP_DIR/app/src/test/java"   -mindepth 1 -delete 2>/dev/null || true
+find "$APP_DIR/app/src/test/kotlin" -mindepth 1 ! -path "$APP_DIR/app/src/test/kotlin/$PKG_PATH*" -delete 2>/dev/null || true
+find "$APP_DIR/app/src/androidTest/java"   -mindepth 1 -delete 2>/dev/null || true
+find "$APP_DIR/app/src/androidTest/kotlin" -mindepth 1 ! -path "$APP_DIR/app/src/androidTest/kotlin/$PKG_PATH*" -delete 2>/dev/null || true
+```
 
 ### Step 5 — Create the CLAUDE.md symlink
 
