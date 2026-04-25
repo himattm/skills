@@ -1,0 +1,50 @@
+package {{packageName}}.di
+
+import android.app.Application
+import dev.zacsweers.metro.AppScope
+import dev.zacsweers.metro.DependencyGraph
+import dev.zacsweers.metro.Provides
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.logging.Logging
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.json.Json
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.network.ktor3.KtorNetworkFetcherFactory
+import coil3.request.crossfade
+
+@DependencyGraph(scope = AppScope::class)
+interface AppGraph {
+
+    val httpClient: HttpClient
+    val imageLoader: ImageLoader
+    val json: Json
+
+    @DependencyGraph.Factory
+    fun interface Factory {
+        fun create(@Provides application: Application): AppGraph
+    }
+
+    @Provides
+    fun provideJson(): Json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+    }
+
+    @Provides
+    fun provideHttpClient(json: Json): HttpClient = HttpClient(OkHttp) {
+        install(ContentNegotiation) { json(json) }
+        install(Logging)
+    }
+
+    @Provides
+    fun provideImageLoader(
+        context: PlatformContext,
+        httpClient: HttpClient,
+    ): ImageLoader = ImageLoader.Builder(context)
+        .components { add(KtorNetworkFetcherFactory(httpClient)) }
+        .crossfade(true)
+        .build()
+}
