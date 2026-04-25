@@ -15,3 +15,6 @@ docs/
 # Environment
 .env
 .env.local
+
+# Worktrees
+.worktrees/
