@@ -28,6 +28,9 @@ interface AppGraph {
     }
 
     @Provides
+    fun providePlatformContext(application: Application): PlatformContext = application
+
+    @Provides
     fun provideJson(): Json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false

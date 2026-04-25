@@ -3,8 +3,8 @@ package {{packageName}}
 import android.app.Application
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.platformLogWriter
+import dev.zacsweers.metro.createGraphFactory
 import {{packageName}}.di.AppGraph
-import {{packageName}}.di.create
 
 class App : Application() {
 
@@ -15,7 +15,7 @@ class App : Application() {
         super.onCreate()
         installLogging()
         installCrashlyticsIfConfigured()
-        graph = AppGraph.Factory().create(this)
+        graph = createGraphFactory<AppGraph.Factory>().create(this)
     }
 
     private fun installLogging() {
