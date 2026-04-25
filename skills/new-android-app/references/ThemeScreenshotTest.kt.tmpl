@@ -1,16 +1,17 @@
 package {{packageName}}.ui.theme
 
-import androidx.compose.foundation.layout.Box
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
+import org.junit.Test
 import org.junit.runner.RunWith
-import org.junit.jupiter.api.Test
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -21,7 +22,7 @@ import org.robolectric.annotation.GraphicsMode
 class ThemeScreenshotTest {
 
     @get:Rule
-    val composeRule = createComposeRule()
+    val composeRule = createAndroidComposeRule<ComponentActivity>()
 
     @Test
     fun lightTheme_smoke() {

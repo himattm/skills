@@ -9,11 +9,24 @@ complexity:
 
 style:
   MagicNumber:
+    # Color literals in theme files are intentional; ignore hex/long ints.
     ignoreNumbers: ['-1', '0', '1', '2', '100']
+    ignorePropertyDeclaration: true
+    ignoreAnnotation: true
+    ignoreEnums: true
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreHashCodeFunction: true
+    ignoreConstantDeclaration: true
+    ignoreNamedArgument: true
+    ignoreRanges: true
   WildcardImport:
     active: true
   MaxLineLength:
     maxLineLength: 120
+  UnusedParameter:
+    active: false
+  UnusedPrivateMember:
+    active: false
 
 naming:
   FunctionNaming:

@@ -37,6 +37,16 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                     "/META-INF/LICENSE*",
                 )
             }
+            lint {
+                // Bootstrap-template false positives:
+                //  - Instantiatable: lint sometimes can't resolve ComponentActivity's
+                //    inheritance through the AndroidX deps in a fresh project.
+                //  - NewApi: lint flow analysis through `when` doesn't always pick up
+                //    `Build.VERSION.SDK_INT >= S` guards on dynamic color calls.
+                disable += setOf("Instantiatable", "NewApi")
+                abortOnError = true
+                checkReleaseBuilds = false
+            }
         }
 
         extensions.configure<KotlinAndroidProjectExtension> {
