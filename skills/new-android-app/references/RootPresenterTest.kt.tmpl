@@ -1,0 +1,17 @@
+package {{packageName}}.nav
+
+import com.slack.circuit.test.test
+import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.Test
+
+class RootPresenterTest {
+
+    @Test
+    fun `initial state is placeholder`() = runTest {
+        RootPresenter().test {
+            val state = awaitItem()
+            state.placeholder shouldBe "TODO: first feature"
+        }
+    }
+}

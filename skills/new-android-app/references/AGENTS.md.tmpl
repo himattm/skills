@@ -1,0 +1,52 @@
+# {{appName}} — Architecture
+
+This app uses an opinionated stack. Follow these conventions before making changes.
+
+## Stack
+
+- **DI**: Metro (`dev.zacsweers.metro`). Graphs declared in `*/di/`. Do not introduce Dagger/Hilt/Koin/Anvil.
+- **UI**: Jetpack Compose only. No XML layouts. No View-system widgets.
+- **Architecture**: Circuit (`com.slack.circuit`). Each feature = one `Screen` + `Presenter` + UI composable. Unidirectional: UI emits `Event`, presenter returns `State`.
+- **Navigation**: Circuit-native (`Navigator`, `BackStack`, `NavigableCircuitContent`). Do not add AndroidX Compose Navigation.
+- **Theme**: Material 3 with dynamic color (Material You) on Android 12+, fallback palette otherwise. Edits go in `ui/theme/`.
+- **Images**: Coil 3. Use the injected `ImageLoader` from the Metro graph; do not construct your own.
+- **Logging**: kermit (`co.touchlab.kermit`). Use the lazy lambda form: `Logger.d { "..." }`. Do not use `android.util.Log` or println.
+- **Networking**: Ktor client (provided through Metro).
+- **Persistence**: DataStore (preferences).
+- **Concurrency**: kotlinx.coroutines. Inject `CoroutineDispatcher`s where needed; do not call `Dispatchers.IO` directly in production code.
+- **Crashes**: Firebase Crashlytics. Activated when `app/google-services.json` is present at build time; the project still builds without it.
+
+## Adding a feature
+
+1. Define `data object FooScreen : Screen` with `data class State(...) : CircuitUiState` and a `sealed interface Event`.
+2. Write `class FooPresenter @Inject constructor(...) : Presenter<FooScreen.State>`.
+3. Write `@Composable fun Foo(state: FooScreen.State, modifier: Modifier)`.
+4. Bind both into the Circuit registry in `circuit/CircuitConfig.kt`.
+5. Add a presenter test using `circuit-test` (`Presenter.test { ... }`).
+
+## Running
+
+- `./gradlew runDebug` — assemble + install + launch on the single connected device.
+- `./gradlew runDebugAll` — same, on every connected device/emulator.
+- Replace `Debug` with `Release` for release variants.
+
+## Testing
+
+- Unit: JUnit5 + Kotest assertions + Turbine.
+- Presenter: `circuit-test`.
+- Compose UI: `androidx.compose.ui.test`.
+- Screenshots: Roborazzi (`./gradlew recordRoborazziDebug` to update goldens).
+
+## Crashlytics setup
+
+1. Create a Firebase project at <https://console.firebase.google.com>.
+2. Add an Android app with package `{{packageName}}`.
+3. Download `google-services.json` and place it at `app/google-services.json` (gitignored).
+4. Rebuild — Crashlytics activates automatically.
+
+## What not to do
+
+- Don't add a second DI framework, nav library, image loader, or logger.
+- Don't bypass Metro to call `new` on classes that have a graph binding.
+- Don't put business logic in composables — it belongs in the Presenter.
+- Don't commit `app/google-services.json` or any signing key.

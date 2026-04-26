@@ -1,0 +1,24 @@
+package {{packageName}}
+
+import android.app.Application
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.platformLogWriter
+import dev.zacsweers.metro.createGraphFactory
+import {{packageName}}.di.AppGraph
+
+class App : Application() {
+
+    lateinit var graph: AppGraph
+        private set
+
+    override fun onCreate() {
+        super.onCreate()
+        installLogging()
+        graph = createGraphFactory<AppGraph.Factory>().create(this)
+    }
+
+    private fun installLogging() {
+        Logger.setLogWriters(platformLogWriter())
+        Logger.setTag("{{appName}}")
+    }
+}
