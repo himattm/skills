@@ -1,0 +1,64 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y @surchin/surchin hook session-start",
+            "timeout": 10,
+            "statusMessage": "Loading Surchin context..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y @surchin/surchin hook pre-query",
+            "timeout": 10,
+            "statusMessage": "Querying Surchin..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y @surchin/surchin hook pre-tool-check",
+            "timeout": 10,
+            "statusMessage": "Checking for pitfalls..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y @surchin/surchin hook auto-capture",
+            "timeout": 10,
+            "statusMessage": "Capturing tool usage..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y @surchin/surchin hook turn-summary",
+            "timeout": 10,
+            "statusMessage": "Generating summary..."
+          }
+        ]
+      }
+    ]
+  }
+}

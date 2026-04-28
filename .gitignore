@@ -18,3 +18,9 @@ docs/
 
 # Worktrees
 .worktrees/
+
+# Jekyll site build
+_site/
+.jekyll-cache/
+.jekyll-metadata
+Gemfile.lock

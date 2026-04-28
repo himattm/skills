@@ -1,0 +1,33 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "himattm",
+  "description": "Matt Mckenna's personal Claude Code plugin marketplace.",
+  "owner": {
+    "name": "Matt Mckenna",
+    "email": "mmckenna@pm.me"
+  },
+  "plugins": [
+    {
+      "name": "android",
+      "description": "Android/Compose development skills: project scaffolding, edge-to-edge insets, the `android` CLI, and screenshot/UI verification.",
+      "author": {
+        "name": "Matt Mckenna",
+        "email": "mmckenna@pm.me"
+      },
+      "category": "development",
+      "source": "./plugins/android",
+      "homepage": "https://github.com/himattm/skills"
+    },
+    {
+      "name": "review",
+      "description": "Pull request review workflows: addressing Gemini feedback, iterative review cycles, and batch PR validation/merging.",
+      "author": {
+        "name": "Matt Mckenna",
+        "email": "mmckenna@pm.me"
+      },
+      "category": "development",
+      "source": "./plugins/review",
+      "homepage": "https://github.com/himattm/skills"
+    }
+  ]
+}
