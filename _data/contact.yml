@@ -10,6 +10,9 @@
 - type: threads
   icon: fab fa-threads
   url: https://www.threads.net/@himattm
+- type: linkedin
+  icon: fab fa-linkedin
+  url: https://www.linkedin.com/in/himattm
 - type: rss
   icon: fas fa-rss
   noblank: true
