@@ -12,6 +12,7 @@ layout:
 tabs:
   # format: <filename_without_extension>: <value>
   home: Install
+  skills: Skills
   categories: Plugins
   tags: Tags
   archives: Archives
