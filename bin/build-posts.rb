@@ -1,19 +1,39 @@
 #!/usr/bin/env ruby
 # Build _posts/ from plugins/<plugin>/skills/<skill>/SKILL.md sources.
 #
-# Run from repo root before `jekyll build`. Each SKILL.md becomes a post with
-# `categories: [<plugin>]` and a stable permalink at /plugins/<plugin>/skills/<skill>/.
-# The transformed _posts/ directory is .gitignored so it only exists at build time.
+# Each SKILL.md becomes a Chirpy post with:
+#   - title: derived from the first markdown H1 in the body, ignoring lines
+#     inside fenced code blocks (so `# Wrong — ...` shell comments don't win).
+#     Falls back to the directory slug if no H1 is found.
+#   - date:  the date of the first git commit that introduced the file (with
+#     --follow so renames don't reset history). Falls back to today.
+#   - permalink: /plugins/<plugin>/skills/<skill>/ — mirrors source structure.
+#   - categories: [<plugin>] — drives Chirpy's auto-archive pages.
+#
+# The transformed _posts/ directory is .gitignored so it only exists at build
+# time. Run from repo root before `jekyll build`.
 
 require 'fileutils'
+require 'open3'
 
 POSTS_DIR = '_posts'
 PLUGINS_GLOB = 'plugins/*/skills/*/SKILL.md'
 
-# Posts need a date to satisfy Jekyll, but skills aren't time-ordered. Use a
-# fixed date (the marketplace's birth) so post order is alphabetical-ish via
-# the filename suffix (plugin-skill).
-POST_DATE = '2026-01-01'
+def first_h1_outside_code(body)
+  clean = body.gsub(/```[\s\S]*?```/, '')
+  m = clean.match(/^# (.+)$/)
+  m ? m[1].strip : nil
+end
+
+def first_commit_date(path)
+  # --follow tracks the file across renames. We can't combine it with --reverse
+  # (a known git quirk where --reverse runs before --follow's rename filter),
+  # so take the last line of default-order (newest-first) output.
+  out, status = Open3.capture2('git', 'log', '--follow', '--format=%cI', '--', path)
+  return nil unless status.success?
+  iso = out.strip.split("\n").last
+  iso&.split('T')&.first
+end
 
 FileUtils.rm_rf(POSTS_DIR)
 FileUtils.mkdir_p(POSTS_DIR)
@@ -21,23 +41,22 @@ FileUtils.mkdir_p(POSTS_DIR)
 count = 0
 Dir.glob(PLUGINS_GLOB).sort.each do |path|
   parts = path.split('/')
-  # plugins/<plugin>/skills/<skill>/SKILL.md
   plugin = parts[1]
   skill = parts[3]
 
   raw = File.read(path)
   body = raw.sub(/\A---\s*\n.*?\n---\s*\n/m, '').sub(/\A\s*/, '')
 
-  h1 = body.match(/^# (.+)$/)
-  title = h1 ? h1[1].strip : skill
+  title = first_h1_outside_code(body) || skill
+  date = first_commit_date(path) || Time.now.strftime('%Y-%m-%d')
 
-  filename = "#{POST_DATE}-#{plugin}-#{skill}.md"
+  filename = "#{date}-#{plugin}-#{skill}.md"
 
   frontmatter = <<~YAML
     ---
     layout: post
     title: "#{title.gsub('"', '\\"')}"
-    date: #{POST_DATE}
+    date: #{date}
     categories: [#{plugin}]
     tags: [#{plugin}, skill]
     permalink: /plugins/#{plugin}/skills/#{skill}/

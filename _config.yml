@@ -23,7 +23,9 @@ social:
     - https://github.com/himattm
 
 # Theme + UX
-theme_mode: dark
+# theme_mode: leave empty so Chirpy respects the user's system preference
+# (prefers-color-scheme). Set to `light` or `dark` to force one mode.
+theme_mode:
 toc: true                # show TOC on post pages
 paginate: 10
 
