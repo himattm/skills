@@ -11,7 +11,7 @@ layout:
 # The tabs of sidebar
 tabs:
   # format: <filename_without_extension>: <value>
-  home: Home
+  home: Install
   categories: Plugins
   tags: Tags
   archives: Archives

@@ -1,15 +1,17 @@
 ---
-title: About
-icon: fas fa-info-circle
-order: 4
+layout: page
+title: Install
+icon: fas fa-download
+order: 0
+permalink: /
 ---
 
 The `himattm` Claude Code plugin marketplace — Matt Mckenna's personal skill bundles for Android/Compose development and pull request review workflows.
 
 ## Plugins
 
-- **[android](/skills/categories/android/)** — Android/Compose development: project scaffolding, edge-to-edge insets, the `android` CLI, and screenshot/UI verification.
-- **[review](/skills/categories/review/)** — Pull request review workflows: addressing Gemini feedback, iterative review cycles, and batch PR validation.
+- **[android](./categories/android/)** — Android/Compose development: project scaffolding, edge-to-edge insets, the `android` CLI, and screenshot/UI verification.
+- **[review](./categories/review/)** — Pull request review workflows: addressing Gemini feedback, iterative review cycles, and batch PR validation.
 
 ## Install
 
