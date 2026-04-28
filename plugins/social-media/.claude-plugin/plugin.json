@@ -1,0 +1,10 @@
+{
+  "name": "social-media",
+  "version": "0.1.0",
+  "description": "Social media writing skills: identify and remove common AI writing tells from prose before posting.",
+  "author": {
+    "name": "Matt Mckenna",
+    "email": "mmckenna@pm.me"
+  },
+  "homepage": "https://github.com/himattm/skills"
+}

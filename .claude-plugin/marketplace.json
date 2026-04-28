@@ -28,6 +28,17 @@
       "category": "development",
       "source": "./plugins/review",
       "homepage": "https://github.com/himattm/skills"
+    },
+    {
+      "name": "social-media",
+      "description": "Social media writing skills: identify and remove common AI writing tells from prose before posting.",
+      "author": {
+        "name": "Matt Mckenna",
+        "email": "mmckenna@pm.me"
+      },
+      "category": "writing",
+      "source": "./plugins/social-media",
+      "homepage": "https://github.com/himattm/skills"
     }
   ]
 }
