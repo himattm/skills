@@ -4,6 +4,12 @@
 - type: bluesky
   icon: fab fa-bluesky
   url: https://bsky.app/profile/mmckenna.me
+- type: mastodon
+  icon: fab fa-mastodon
+  url: https://androiddev.social/@mattm
+- type: threads
+  icon: fab fa-threads
+  url: https://www.threads.net/@himattm
 - type: rss
   icon: fas fa-rss
   noblank: true
