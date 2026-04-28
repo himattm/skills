@@ -13,15 +13,27 @@ baseurl: "/skills"
 github:
   username: himattm
 
+# Sidebar profile
+avatar: "https://github.com/himattm.png"
+
 social:
   name: Matt Mckenna
   email: mmckenna@pm.me
   links:
     - https://github.com/himattm
 
+# Theme + UX
 theme_mode: dark
-
+toc: true                # show TOC on post pages
 paginate: 10
+
+# Make _tabs/ a Jekyll collection so Chirpy renders the sidebar nav.
+# (Theme defines this in its own _config; we re-declare since site config
+# overrides theme config wholesale, not by merge.)
+collections:
+  tabs:
+    output: true
+    sort_by: order
 
 # Skills are rendered as Chirpy posts; the transform script in bin/build-posts.rb
 # generates _posts/ from plugins/<plugin>/skills/<skill>/SKILL.md before each build.
@@ -35,6 +47,12 @@ defaults:
       comments: false
       toc: true
       hidden: false
+  - scope:
+      path: _tabs
+      type: tabs
+    values:
+      layout: page
+      permalink: /:title/
 
 plugins:
   - jekyll-paginate
