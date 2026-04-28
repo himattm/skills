@@ -1,16 +1,68 @@
+theme: jekyll-theme-chirpy
+
+lang: en
+timezone: America/Los_Angeles
+
 title: himattm skills
-description: Matt Mckenna's Claude Code plugin marketplace — Android development and PR review skills.
-url: https://himattm.github.io
-baseurl: /skills
-remote_theme: just-the-docs/just-the-docs
+tagline: Claude Code plugin marketplace
+description: Matt Mckenna's personal skill bundles for Android/Compose development and pull request review workflows.
+
+url: "https://himattm.github.io"
+baseurl: "/skills"
+
+github:
+  username: himattm
+
+social:
+  name: Matt Mckenna
+  email: mmckenna@pm.me
+  links:
+    - https://github.com/himattm
+
+theme_mode: dark
+
+paginate: 10
+
+# Skills are rendered as Chirpy posts; the transform script in bin/build-posts.rb
+# generates _posts/ from plugins/<plugin>/skills/<skill>/SKILL.md before each build.
+# Per-post `permalink:` is set by the script so URLs mirror the source structure.
+defaults:
+  - scope:
+      path: ""
+      type: posts
+    values:
+      layout: post
+      comments: false
+      toc: true
+      hidden: false
 
 plugins:
-  - jekyll-titles-from-headings
+  - jekyll-paginate
+  - jekyll-redirect-from
+  - jekyll-seo-tag
+  - jekyll-archives
+  - jekyll-sitemap
+  - jekyll-include-cache
 
-include:
-  - plugins
+jekyll-archives:
+  enabled: [categories, tags]
+  layouts:
+    category: category
+    tag: tag
+  permalinks:
+    category: /categories/:name/
+    tag: /tags/:name/
 
 exclude:
+  - Gemfile
+  - Gemfile.lock
+  - bin/
+  - README.md
+  - .codex/
+  - .claude/
+  - docs/
+  - .claude-plugin/
+  - "plugins/*/.claude-plugin/"
   - "plugins/*/skills/**/*.tmpl"
   - "plugins/*/skills/**/*.kts"
   - "plugins/*/skills/**/build-logic"
@@ -20,50 +72,6 @@ exclude:
   - "plugins/*/skills/**/editorconfig"
   - "plugins/*/skills/**/gitignore"
   - "plugins/*/skills/**/libs.versions.toml"
-  - README.md
-  - Gemfile
-  - Gemfile.lock
-  - .codex/
-  - .claude/
-  - docs/
-
-# Just-the-Docs theme settings
-search_enabled: true
-search:
-  heading_level: 3
-  previews: 3
-  preview_words_before: 5
-  preview_words_after: 10
-heading_anchors: true
-color_scheme: dark
-
-# jekyll-titles-from-headings settings — pull page title from first # H1
-titles_from_headings:
-  enabled: true
-  strip_title: false
-  collections: true
-
-# Inject layout + parent into each plugin's skills, so SKILL.md files don't
-# need any Jekyll-specific frontmatter.
-defaults:
-  - scope:
-      path: "plugins/android/skills/*/SKILL.md"
-    values:
-      layout: default
-      parent: android
-  - scope:
-      path: "plugins/review/skills/*/SKILL.md"
-    values:
-      layout: default
-      parent: review
-  - scope:
-      path: "plugins/*/index.md"
-    values:
-      layout: default
-
-# Footer and links
-aux_links:
-  "GitHub":
-    - "https://github.com/himattm/skills"
-back_to_top: true
-back_to_top_text: "Back to top"
+  # Don't process the source SKILL.md files directly — only the transformed _posts.
+  - "plugins/*/skills/*/SKILL.md"
+  - "plugins/*/skills/*/references/"
