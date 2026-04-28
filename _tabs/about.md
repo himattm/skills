@@ -15,10 +15,10 @@ The `himattm` Claude Code plugin marketplace — Matt Mckenna's personal skill b
 
 In Claude Code:
 
-```console
-$ /plugin marketplace add https://github.com/himattm/skills
-$ /plugin install android@himattm
-$ /plugin install review@himattm
+```bash
+/plugin marketplace add https://github.com/himattm/skills
+/plugin install android@himattm
+/plugin install review@himattm
 ```
 
 The marketplace manifest is refreshed at startup, so version bumps to either plugin auto-deploy on the next Claude Code launch — no manual `/plugin update` needed.
