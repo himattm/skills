@@ -18,9 +18,9 @@ avatar: "https://github.com/himattm.png"
 
 social:
   name: Matt Mckenna
-  email: mmckenna@pm.me
   links:
     - https://github.com/himattm
+    - https://bsky.app/profile/mmckenna.me
 
 # Theme + UX
 # theme_mode: leave empty so Chirpy respects the user's system preference

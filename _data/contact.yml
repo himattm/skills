@@ -1,6 +1,10 @@
 - type: github
   icon: fab fa-github
   url: https://github.com/himattm
-- type: email
-  icon: fas fa-envelope
-  url: mailto:mmckenna@pm.me
+- type: bluesky
+  icon: fab fa-bluesky
+  url: https://bsky.app/profile/mmckenna.me
+- type: rss
+  icon: fas fa-rss
+  noblank: true
+  url: /feed.xml
