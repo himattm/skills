@@ -1,6 +1,6 @@
 ---
 title: Plugins
-icon: fas fa-stream
+icon: fas fa-puzzle-piece
 order: 1
 layout: categories
 ---
