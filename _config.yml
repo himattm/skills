@@ -32,6 +32,14 @@ theme_mode:
 toc: true                # show TOC on post pages
 paginate: 10
 
+# Disable HTML compression. Chirpy's refactor-content strips the <pre> wrapper
+# from highlighted code, then jekyll-compress-html collapses internal whitespace
+# in the unwrapped <code>, eating newlines in multi-line code blocks. Skipping
+# compression keeps the newlines and only costs ~15% HTML size.
+compress_html:
+  ignore:
+    envs: all
+
 # Make _tabs/ a Jekyll collection so Chirpy renders the sidebar nav.
 # (Theme defines this in its own _config; we re-declare since site config
 # overrides theme config wholesale, not by merge.)
