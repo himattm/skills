@@ -24,7 +24,8 @@ Create projects from templates using the `create` command.
 For example: `android create empty-activity --name="My App" --output=./my-app`
 
 ## Interacting with devices
-For more information on interacting with running devices, see [here](references/interact.md)
+
+For inspecting on-screen UI and driving taps, swipes, and text input from element coordinates, use the **`verify-android-layout`** skill — it covers the JSON shape returned by `android layout`, `--diff` for iteration loops, and the full `adb shell input` workflow. Use **`verify-android-screen`** when a screenshot is required (WebView, animation, visual fidelity).
 
 ## Running journey tests
 For more information on running journeys, see [here](references/journeys.md)
@@ -47,17 +48,18 @@ Use the `run` command to run Android apps.
 
 Manage Android Virtual Devices (AVDs) using the `android emulator` command
 
-## Capturing screenshots
+## Verifying UI state
 
-Capture an image of the current screen of a connected Android device and output it to a file using the `android screenshot` command.
+Two skills cover Android UI verification — pick based on what you need to check:
+
+- **`verify-android-layout`** — default for almost everything. Uses `android layout` to get a structured JSON tree of the on-screen UI (text, resource ids, bounds, state, interactions). Cheaper and more precise than a screenshot. Use `--diff` in iteration loops to get only what changed.
+- **`verify-android-screen`** — fallback for WebView content, animations, visual fidelity (colors, fonts, image content), or finding elements by appearance via `android screen capture --annotate`.
+
+Reach for `verify-android-layout` first; only escalate to `verify-android-screen` when JSON can't answer the question.
 
 ## Managing skills
 
 Manage antigravity agent skills for Android using the `android skills` command.
-
-## Inspecting UI Layouts
-
-Use the `android layout` command to inspect the UI layout of an Android application. It returns the layout tree of an Android application in JSON format. When debugging UI errors, this is often a much faster approach than taking a screenshot.
 
 ## Updating the CLI
 
