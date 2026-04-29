@@ -1,0 +1,13 @@
+{
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/queued-plan-session-start.sh",
+          "timeout": 3
+        }
+      ]
+    }
+  ]
+}
