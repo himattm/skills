@@ -6,6 +6,10 @@ description: Orchestrates Android development tasks including project creation, 
 
 This skill provides instructions for using the `android` CLI tool. The tool includes various commands for creating projects, running applications, interacting with devices, and managing the CLI environment.
 
+## Prerequisites
+
+This skill assumes the `android` CLI is already installed and on `PATH`. If `android --version` fails, install the CLI first (consult its official documentation for the install method appropriate to your platform), then re-run the failing command.
+
 ## SDK management
 To manage the installation of Android SDKs and tools, use the `sdk` command. For example:
 
