@@ -1,0 +1,9 @@
+{
+  "name": "utilities",
+  "version": "0.3.0",
+  "description": "Utility skills: render code snippets as shareable images (code-as-image).",
+  "author": {
+    "name": "Matt Mckenna"
+  },
+  "homepage": "https://github.com/himattm/skills"
+}

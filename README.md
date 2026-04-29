@@ -15,7 +15,7 @@ The `himattm` Claude Code plugin marketplace — Matt Mckenna's personal skill b
 │   ├── review/            # Pull request review workflows
 │   │   ├── .claude-plugin/plugin.json
 │   │   └── skills/
-│   └── social-media/      # Social media writing skills
+│   └── utilities/         # Utility skills
 │       ├── .claude-plugin/plugin.json
 │       └── skills/
 ├── references/            # platform tool mappings
@@ -28,7 +28,7 @@ The `himattm` Claude Code plugin marketplace — Matt Mckenna's personal skill b
 |--------|--------|
 | `android@himattm` | `android-cli`, `edge-to-edge`, `new-android-app`, `verify-android-ui` |
 | `review@himattm` | `address-gemini-review`, `review-cycle`, `validate-merge-prs` |
-| `social-media@himattm` | `deslop` |
+| `utilities@himattm` | `code-as-image` |
 
 ## Usage
 
@@ -40,7 +40,7 @@ The `himattm` Claude Code plugin marketplace — Matt Mckenna's personal skill b
 /plugin marketplace add https://github.com/himattm/skills
 /plugin install android@himattm
 /plugin install review@himattm
-/plugin install social-media@himattm
+/plugin install utilities@himattm
 ```
 
 Claude Code refreshes the marketplace manifest at startup; new skills and version bumps in either plugin's `plugin.json` ship to every machine without manual `/plugin update` calls.

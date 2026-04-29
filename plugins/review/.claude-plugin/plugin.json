@@ -3,8 +3,7 @@
   "version": "0.1.0",
   "description": "Pull request review workflows: addressing Gemini feedback, iterative review cycles, and batch PR validation/merging.",
   "author": {
-    "name": "Matt Mckenna",
-    "email": "mmckenna@pm.me"
+    "name": "Matt Mckenna"
   },
   "homepage": "https://github.com/himattm/skills"
 }
