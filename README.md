@@ -28,7 +28,7 @@ The `himattm` Claude Code plugin marketplace — Matt McKenna's personal skill b
 |--------|--------|
 | `android@himattm` | `android-cli`, `new-android-app`, `verify-android-layout`, `verify-android-screen` |
 | `review@himattm` | `address-gemini-review`, `review-cycle`, `validate-merge-prs` |
-| `utilities@himattm` | `code-as-image` |
+| `utilities@himattm` | `code-as-image`, `interrogation` |
 
 ## Usage
 
