@@ -11,8 +11,9 @@ The user gave you a prompt that's likely under-specified. Drill in with structur
 
 1. **Read the prompt carefully.** Identify the 2–4 ambiguities that, if guessed wrong, would lead to materially different output. These are the only things worth asking about.
 2. **Ask via `AskUserQuestion`.** Batch related questions into one call — never one question per turn. Use multiple-choice when the answer space is bounded; use a free-form option for open ends.
-3. **Iterate at most twice more.** After each answer, ask: "could I act now without surprising the user?" If yes, stop. If a follow-up would only marginally improve quality, stop.
-4. **Confirm and proceed.** End with a one-paragraph restatement of what the user wants. Pause for any final correction, then begin the work.
+3. **Outline your understanding after every answer.** Don't silently decide "I have enough." Write a short, high-level outline of what you now think the user wants — scope, output shape, key choices — so the user can see your mental model and correct it before more time is invested. Bullet points are fine. Keep it to ~5 lines.
+4. **Iterate at most twice more.** If the outline reveals a remaining ambiguity, ask another batched round. If the user confirms the outline (or says "go" / "ship it"), stop. Three rounds maximum.
+5. **Final confirm and proceed.** Once the outline matches, restate the agreed plan in one paragraph and begin the work.
 
 ## What to ask about
 
@@ -30,6 +31,6 @@ The user gave you a prompt that's likely under-specified. Drill in with structur
 
 ## Stop conditions
 
-- You can act on the prompt without making any guess that could surprise the user
+- The user confirms your outline (mental models match)
 - The user says "go", "ship it", "you have enough", or equivalent
 - Three rounds in, further questions would scope-creep rather than clarify
