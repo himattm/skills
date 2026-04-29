@@ -10,7 +10,7 @@ The `himattm` Claude Code plugin marketplace — Matt Mckenna's personal skill b
 
 ## Plugins
 
-- **[android](./categories/android/)** — Android/Compose development: project scaffolding, edge-to-edge insets, the `android` CLI, and screenshot/UI verification.
+- **[android](./categories/android/)** — Android/Compose development: project scaffolding, the `android` CLI, and screenshot/UI verification.
 - **[review](./categories/review/)** — Pull request review workflows: addressing Gemini feedback, iterative review cycles, and batch PR validation.
 - **[utilities](./categories/utilities/)** — Utility skills: render code snippets as shareable images (code-as-image).
 

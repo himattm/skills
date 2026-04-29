@@ -1,7 +1,7 @@
 {
   "name": "android",
   "version": "0.1.0",
-  "description": "Android/Compose development skills: project scaffolding, edge-to-edge insets, the `android` CLI, and screenshot/UI verification.",
+  "description": "Android/Compose development skills: project scaffolding, the `android` CLI, and screenshot/UI verification.",
   "author": {
     "name": "Matt Mckenna"
   },

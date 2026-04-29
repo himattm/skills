@@ -191,12 +191,12 @@ Print to the user:
 > 2. **Run on a device:** `./gradlew runDebug` (single device) or `./gradlew runDebugAll` (all connected).
 > 3. **Add your first feature:** Follow the "Adding a feature" recipe in `AGENTS.md`. Use `circuit-test` for the presenter.
 > 4. **Use the `android-cli` skill** for SDK / device / docs operations.
-> 5. **Use the `edge-to-edge` skill** if you hit inset or system-bar issues when adding real screens.
+> 5. **Use the upstream `edge-to-edge` skill from the `android` CLI** if you hit inset or system-bar issues when adding real screens.
 
 ## Composes with
 
 - **`android-cli`** — used in steps 2 and 3, surfaced in step 8's next steps.
-- **`edge-to-edge`** — referenced in `AGENTS.md` and step 8 as the canonical guide for inset issues.
+- **`edge-to-edge` (from the upstream `android` CLI)** — referenced in `AGENTS.md` and step 8 as the canonical guide for inset issues.
 - **`superpowers:test-driven-development`** — recommended for adding new features (TDD-first via `circuit-test`).
 - **`superpowers:verification-before-completion`** — step 6 is the verification gate.
 
