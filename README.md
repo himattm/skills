@@ -1,6 +1,6 @@
 # AI Skills
 
-The `himattm` Claude Code plugin marketplace — Matt Mckenna's personal skill bundles.
+The `himattm` Claude Code plugin marketplace — Matt McKenna's personal skill bundles.
 
 ## Structure
 
