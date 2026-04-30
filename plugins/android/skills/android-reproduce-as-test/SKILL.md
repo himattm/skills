@@ -36,6 +36,32 @@ The most common debugging failure is fixing the wrong thing. The agent sees a st
 
 Default to the fastest layer that can express the bug. Pushing a JVM test up to instrumentation when a mock would do is a common time waster.
 
+### Robolectric quick-setup (if the project doesn't have it yet)
+
+If your bug needs Android framework classes but the project has no Robolectric, ephemerally add it:
+
+```kotlin
+// app/build.gradle.kts — under android { ... }
+testOptions {
+    unitTests {
+        isIncludeAndroidResources = true   // Required for Robolectric
+    }
+}
+
+// app/build.gradle.kts — under dependencies { ... }
+testImplementation("org.robolectric:robolectric:4.13")
+```
+
+Annotate the test class:
+
+```kotlin
+@RunWith(RobolectricTestRunner::class)
+@Config(application = Application::class, sdk = [33])
+class LoginViewModelTest { /* ... */ }
+```
+
+Use `@Config(application = MyApp::class)` if your repro needs your real `Application` subclass; pass `Application::class` (the framework default) when you don't. Robolectric defaults `sdk` to the project's `targetSdk`; pin it explicitly when the bug is API-level-sensitive. Keep the dependency add scoped to this PR if the rest of the project doesn't use Robolectric — or coordinate adding it as a permanent dev dependency separately.
+
 ## Workflow
 
 ### 1. Name the test for the behavior, not the symptom

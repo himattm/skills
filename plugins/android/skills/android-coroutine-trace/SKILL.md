@@ -62,7 +62,10 @@ The simplest pattern: dump on a sentinel logcat tag whenever you want a snapshot
 
 ```kotlin
 // In Application.onCreate, AGENT_DEBUGPROBES_<id>:
-registerReceiver(
+import androidx.core.content.ContextCompat   // androidx.core:core 1.9.0+
+
+ContextCompat.registerReceiver(
+    this,
     object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
             val out = StringBuilder()
@@ -73,9 +76,11 @@ registerReceiver(
         }
     },
     IntentFilter("AGENT_DUMP_COROUTINES"),
-    Context.RECEIVER_NOT_EXPORTED
+    ContextCompat.RECEIVER_NOT_EXPORTED
 )
 ```
+
+`ContextCompat.registerReceiver` is required for `RECEIVER_NOT_EXPORTED` to work across all API levels — the `Context.RECEIVER_NOT_EXPORTED` constant was added in API 33, but `ContextCompat` handles older platforms gracefully. If your project doesn't have `androidx.core:core` 1.9+, either add it as a `debugImplementation` for the probe, or skip the receiver and write directly to `/data/data/<pkg>/files/coroutine-dump.txt` plus `adb pull`.
 
 Then trigger from the host:
 

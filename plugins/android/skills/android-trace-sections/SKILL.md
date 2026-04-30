@@ -163,17 +163,19 @@ chmod +x /tmp/trace_processor
 # Run a SQL query
 /tmp/trace_processor /tmp/trace.perfetto-trace -q - <<'SQL' > /tmp/trace-results.txt
 SELECT
-  name,
-  ts,
-  dur / 1e6 AS dur_ms,
-  thread.name AS thread_name
-FROM slice
-JOIN thread_track ON slice.track_id = thread_track.id
-JOIN thread USING (utid)
-WHERE name LIKE 'AGENT_TRACE_%'
-ORDER BY ts;
+  s.name,
+  s.ts,
+  s.dur / 1e6 AS dur_ms,
+  COALESCE(t.name, 'process/async') AS thread_name
+FROM slice s
+LEFT JOIN thread_track tt ON s.track_id = tt.id
+LEFT JOIN thread t ON tt.utid = t.utid
+WHERE s.name LIKE 'AGENT_TRACE_%'
+ORDER BY s.ts;
 SQL
 ```
+
+The `LEFT JOIN` is required: trace sections wrapped across coroutine boundaries (the `Trace.beginSection` / `endSection` form across `withContext`) sometimes land on async tracks instead of thread tracks. An inner join would silently drop those slices.
 
 Hand the result file to a Sonnet sub-agent:
 

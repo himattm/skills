@@ -87,12 +87,12 @@ Pass `model: "sonnet"` — narrow text parsing doesn't need Opus.
 Before declaring the task done, run from the repo root:
 
 ```bash
-rg 'AGENT_PROBE_'
+rg 'AGENT_PROBE_a4f9c2e1'
 ```
 
-**The expected output is empty.** If it's not, remove every match — including the `private const val PROBE = ...` line — and run again. Only then is the task done.
+(Substitute your investigation's id.) **The expected output is empty.** If it's not, remove every match — including the `private const val PROBE = ...` declaration line — and run again. Only then is the task done.
 
-If you used multiple sentinel ids across an investigation, grep for the prefix only:
+If you used multiple sentinel ids across one investigation, grep for the shared prefix to catch them all:
 
 ```bash
 rg 'AGENT_PROBE_'

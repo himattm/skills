@@ -81,7 +81,8 @@ Latent races often need help to surface. Layer one stressor at a time:
 
 | Stressor | Command | Surfaces |
 |----------|---------|----------|
-| **Rotation** | `adb shell content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:1` (or `wm density 320` toggle) | Lifecycle / config-change races |
+| **Rotation** | `adb shell settings put system accelerometer_rotation 0 && adb shell settings put system user_rotation 1` (cycle 0/1/2/3 between iterations) | Lifecycle / config-change races |
+| **Density change** | `adb shell wm density 320` *(reset with `adb shell wm density reset`)* | Configuration-change recreation paths |
 | **Slow CPU** | `adb shell setprop debug.cpu.throttle 50` *(reset with `""`)* | Timing-dependent bugs |
 | **Network drop** | `adb shell svc data disable; sleep 3; adb shell svc data enable` | Connectivity edge cases |
 | **Low memory** | `adb shell am send-trim-memory <pkg> COMPLETE` | Process-death restoration |
@@ -110,6 +111,9 @@ For "is it really fixed?" verification, 100 clean iterations under realistic str
 # Reset any system properties / settings you toggled
 adb shell setprop debug.cpu.throttle ""
 adb shell settings put global window_animation_scale 1
+adb shell settings put system accelerometer_rotation 1
+adb shell settings put system user_rotation 0
+adb shell wm density reset
 adb shell svc data enable
 
 # Delete scratch files

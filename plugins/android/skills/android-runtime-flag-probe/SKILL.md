@@ -7,12 +7,12 @@ description: Use to flip framework-level diagnostics without code changes — ve
 
 ## When to use
 
-- "Is `OkHttp` actually firing this request?" — `log.tag.okhttp VERBOSE`
 - "Is the view bigger than I think?" — `debug.layout true` overlays bounds
 - "Is overdraw killing scroll perf?" — `debug.hwui.show_layers_updates true`
 - "Are frames missing the budget?" — `debug.hwui.profile true`
 - "Is this animation hiding a logic bug?" — `window_animation_scale 5` slows everything
 - "Is `Choreographer` complaining about slow frames?" — `log.tag.Choreographer VERBOSE`
+- "Is `ActivityManager` firing the lifecycle transition I expect?" — `log.tag.ActivityManager VERBOSE`
 
 ## When NOT to use
 
@@ -32,13 +32,14 @@ The framework reads this at `Log.isLoggable(tag, level)` time, so it works witho
 
 | Tag | Surfaces |
 |-----|----------|
-| `OkHttp` / `OkHttpClient` | OkHttp request/response logging *(only if app uses `HttpLoggingInterceptor` with `Level.BASIC`+)* |
 | `Choreographer` | Frame skips, "Skipped N frames" warnings escalate to verbose |
 | `ViewRootImpl` | Touch dispatch, layout passes, draw scheduling |
 | `ActivityManager` | Activity lifecycle transitions, ANR details |
 | `ConnectivityService` | Network state changes |
 | `WindowManager` | Window add/remove, focus changes |
 | `InputDispatcher` | Touch dispatch internals |
+
+**HTTP libraries don't honor `log.tag.<Tag>`.** OkHttp, Ktor, Retrofit, etc. don't read Android's `Log.isLoggable` — they use their own logger interfaces (e.g. `HttpLoggingInterceptor` for OkHttp). To get HTTP logging you have to wire the library's interceptor in code, which makes it a `android-probe-logging` task, not a runtime-flag one.
 
 ### Layout / rendering diagnostics
 
@@ -96,14 +97,14 @@ Don't flip everything. One or two flags per investigation. If you flip ten flags
 # Track what you flipped — write a reset script first
 cat > /tmp/runtime-flag-reset.sh <<'EOF'
 #!/usr/bin/env bash
-adb shell setprop log.tag.OkHttp ""
+adb shell setprop log.tag.Choreographer ""
 adb shell setprop debug.layout false
 adb shell settings put global window_animation_scale 1
 EOF
 chmod +x /tmp/runtime-flag-reset.sh
 
 # Then apply
-adb shell setprop log.tag.OkHttp VERBOSE
+adb shell setprop log.tag.Choreographer VERBOSE
 adb shell setprop debug.layout true
 adb shell settings put global window_animation_scale 5
 ```
@@ -132,7 +133,7 @@ android screen capture -o /tmp/runtime-flag-screen.png
 For log-tag flags, dump filtered logcat:
 
 ```bash
-adb logcat -d -s OkHttp:V Choreographer:V > /tmp/runtime-flag-log.txt
+adb logcat -d -s Choreographer:V ActivityManager:V > /tmp/runtime-flag-log.txt
 ```
 
 Delegate parsing to a Sonnet sub-agent if either output is non-trivial.
@@ -147,7 +148,7 @@ Then verify each flag is actually back to default:
 
 ```bash
 adb shell getprop debug.layout                # expect empty or false
-adb shell getprop log.tag.OkHttp              # expect empty
+adb shell getprop log.tag.Choreographer       # expect empty
 adb shell settings get global window_animation_scale   # expect 1
 ```
 
@@ -171,7 +172,7 @@ adb shell settings put global transition_animation_scale 1
 adb shell settings put global animator_duration_scale 1
 
 # Reset all log.tag overrides — there's no batch reset, so list yours
-for tag in OkHttp Choreographer ViewRootImpl ActivityManager; do
+for tag in Choreographer ViewRootImpl ActivityManager ConnectivityService WindowManager InputDispatcher; do
     adb shell setprop log.tag.$tag ""
 done
 ```

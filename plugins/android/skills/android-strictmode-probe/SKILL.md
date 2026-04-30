@@ -34,10 +34,12 @@ A `Log.d` probe won't surface these. An espresso test won't fail. The app runs �
 
 ### 1. Install temporarily, with `.penaltyLog()` only
 
-In `Application.onCreate`, **before** other initialization:
+At the top of `Application.onCreate`, before your own initialization:
 
 ```kotlin
 override fun onCreate() {
+    super.onCreate()
+
     // AGENT_STRICTMODE_<id>: temporary probe — remove before commit
     StrictMode.setThreadPolicy(
         StrictMode.ThreadPolicy.Builder()
@@ -58,8 +60,6 @@ override fun onCreate() {
             .penaltyLog()
             .build()
     )
-
-    super.onCreate()
     // ... existing init ...
 }
 ```
@@ -68,7 +68,7 @@ override fun onCreate() {
 
 - **Always `.penaltyLog()`. Never `.penaltyDeath()` for a probe** — death penalty crashes the app on first violation, which masks every later one.
 - **Mark the block with a sentinel comment** (`AGENT_STRICTMODE_<id>`) so the cleanup grep finds it.
-- Install **before `super.onCreate()`** so framework calls during init are also covered.
+- **Install at the top of `Application.onCreate`** so it covers your own init code. Note: `ContentProvider.onCreate` runs *before* `Application.onCreate` and won't be caught here — if you suspect violations during ContentProvider init (Room, WorkManager initializers, etc.), install in `attachBaseContext` instead, or add a `Configuration.Provider` with StrictMode set up before initialization.
 
 ### 2. Drive the suspect flow
 
