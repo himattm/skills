@@ -25,6 +25,27 @@ A diff between two snapshots gives a categorical answer where staring at the scr
 - The bug is purely visual fidelity (color, font, image) — use `verify-android-screen`
 - The bug is a crash — use `android-probe-logging` and `adb logcat`
 
+## Pre-flight: detect what your project supports
+
+```bash
+# 1. adb device authorized
+adb devices                              # expect "<id>  device"
+
+# 2. The `android` CLI is installed (used by the layout / screen channels)
+which android && android --version
+
+# 3. Package name (needed for dumpsys meminfo, am send-trim-memory)
+adb shell pm list packages | grep -i <fragment>
+```
+
+**No `android` CLI installed?** See the `android-cli` skill for installation; it's a one-time setup. The `dumpsys meminfo` / `getprop` / screenshot channels still work via raw `adb`, but the layout JSON channel requires the CLI's bridge.
+
+**Layout channel needs an Accessibility window.** `android layout` reads via `uiautomator`, which sometimes returns empty when no Activity is in the foreground or the screen is locked. Wake the device (`adb shell input keyevent KEYCODE_WAKEUP`) and ensure your app is in the foreground before capturing.
+
+**Diff size sanity.** The snapshot bundle for a busy screen can be 100+ KB JSON. Diffs over 30 KB should always be delegated to a Sonnet sub-agent rather than read inline; the JSON tree's verbosity makes inline reading expensive. Pass the file path, not the content.
+
+**Same device for A and B.** Memory categories vary across OEMs and device states (recent dexopt, recent reboot). Don't compare a snapshot from a Pixel emulator to one from a physical Galaxy — same device, same emulator instance, ideally same boot.
+
 ## What goes in a snapshot bundle
 
 Pick the channels relevant to your question. Don't capture all four every time — diffing noise wastes tokens.

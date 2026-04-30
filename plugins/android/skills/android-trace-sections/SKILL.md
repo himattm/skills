@@ -31,6 +31,36 @@ description: Use to answer questions logging can't — "did this run, on what th
 - The bug is a crash or exception — read logcat
 - You need to inspect specific values — tracing supports key/value but logging is more flexible
 
+## Pre-flight: detect what your project supports
+
+```bash
+# 1. androidx.tracing on the classpath? (preferred for the trace { } lambda)
+grep -r 'androidx.tracing' app/build.gradle* gradle/libs.versions.toml 2>/dev/null
+
+# 2. minSdk — Trace.beginSection works on all APIs; Trace.beginAsyncSection
+#    requires API 29+
+grep -E 'minSdk' app/build.gradle* gradle/libs.versions.toml 2>/dev/null
+
+# 3. Build is debuggable (Trace sections fire only in debuggable apps unless
+#    the device is rooted)
+grep -A2 'buildTypes' app/build.gradle* | grep -i 'debuggable'
+```
+
+**No `androidx.tracing`?** Two options:
+
+- Add `implementation("androidx.tracing:tracing-ktx:1.2.0")` (or `tracing` for the Java-only API). Keep this even after the probe — it's tiny and useful long-term.
+- Use the platform `android.os.Trace` directly: `Trace.beginSection("...")` / `Trace.endSection()` work on every API level without any dependency. You lose the `trace { }` lambda but the slices come through identically.
+
+**Groovy DSL.** Use single-quoted strings:
+
+```groovy
+implementation 'androidx.tracing:tracing-ktx:1.2.0'
+```
+
+**Java codebase.** `Trace.beginSection("AGENT_TRACE_<id>....")` / `Trace.endSection()` in a try/finally — same as Kotlin. The `trace { }` lambda is Kotlin-only; in Java, fall back to the manual begin/end form everywhere.
+
+**R8/ProGuard stripping `Trace` calls.** Aggressive minification can elide `Trace.beginSection` calls in release. For the probe loop this isn't an issue (debug builds don't minify), but if you instrument a release build keep `-keep class android.os.Trace { *; }` in your ProGuard rules.
+
 ## The pattern: instrument → capture → inspect → remove
 
 ### 1. Add the import and wrap the suspect block

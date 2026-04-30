@@ -34,6 +34,47 @@ This is the right tool whenever:
 - You don't have a known-good ref — use `android-probe-logging` to investigate from symptoms
 - The bug is non-deterministic and not in changed code — use `android-crash-repro-loop` to characterize it first
 
+## Pre-flight: detect what your repo supports
+
+```bash
+# 1. The two refs are reachable
+git rev-parse <good> <bad>               # both should resolve to a SHA
+
+# 2. The diff size — sanity-check before generating a multi-MB patch
+git diff --shortstat <good>..<bad>
+
+# 3. The commit count and span — gives you a rough sense of investigation scope
+git log <good>..<bad> --oneline | wc -l
+git log <good>..<bad> --format='%ai' | sort -u | head -1
+git log <good>..<bad> --format='%ai' | sort -u | tail -1
+```
+
+**If a ref is unreachable**, fetch the relevant remote tags / branches before scanning: `git fetch origin --tags`. Working from a shallow clone (CI artifacts, GitHub Codespace) often means missing history — check `git rev-parse --is-shallow-repository` and `git fetch --unshallow` if true.
+
+**Diff size guidance:**
+
+| Diff size | Strategy |
+|-----------|----------|
+| < 500 lines | Just read it; don't bother with sub-agent delegation |
+| 500–10K | Single sub-agent pass against the full diff |
+| 10K–100K | Single sub-agent, but include `--stat` and `git log --oneline` to give it directory hints |
+| 100K+ | Split by directory and run scans in parallel; combine the rankings |
+| 1M+ | The bug brief needs to identify a likely subsystem first; don't scan a million lines blind |
+
+**Vendored / generated code in the diff.** Large auto-generated directories (`generated/`, `build/`, vendored deps) waste sub-agent attention. Filter them out:
+
+```bash
+git diff <good>..<bad> -- ':!**/generated/**' ':!**/build/**' ':!**/.gradle/**' \
+    > /tmp/regression-diff.patch
+```
+
+**Monorepo with non-Android changes.** Filter to relevant paths early — Android perf bugs rarely live in iOS or web changes:
+
+```bash
+git diff <good>..<bad> -- 'android/' 'shared/' '*.kt' '*.java' '*.xml' \
+    > /tmp/regression-diff.patch
+```
+
 ## Workflow
 
 ### 1. Identify the good and bad refs

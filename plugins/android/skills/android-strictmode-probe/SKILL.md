@@ -30,6 +30,41 @@ A `Log.d` probe won't surface these. An espresso test won't fail. The app runs �
 - The bug is in pure Kotlin logic — use `android-reproduce-as-test`
 - The question is "did this code run?" — use `android-probe-logging`
 
+## Pre-flight: detect what your project supports
+
+Before installing the probe, confirm:
+
+```bash
+# 1. There's an Application subclass to install StrictMode in
+grep -rE 'class\s+\w+\s*:\s*Application|extends\s+Application' \
+    app/src/main/java app/src/main/kotlin 2>/dev/null
+# Expect at least one match. If empty, the project uses the default
+# android.app.Application — you'll need to create a subclass and wire
+# it via android:name in AndroidManifest.xml before installing the probe.
+
+# 2. The manifest declares it
+grep 'android:name' app/src/main/AndroidManifest.xml
+
+# 3. minSdk — affects which detect* methods are available
+grep -E 'minSdk' app/build.gradle* gradle/libs.versions.toml 2>/dev/null
+```
+
+**API-level gates.** Most `.detect*` methods are available from API 21+; the more recent ones gate at higher levels:
+
+| Method | Min API |
+|--------|---------|
+| `detectUnsafeIntentLaunch` | 31 |
+| `detectIncorrectContextUse` | 31 |
+| `detectImplicitDirectBoot` | 29 |
+| `detectCredentialProtectedWhileLocked` | 29 |
+| `detectNonSdkApiUsage` | 28 |
+
+If your project's `minSdk` is below the level where a method is available, the call will compile but `NoSuchMethodError` at runtime on older devices. Wrap newer methods with `Build.VERSION.SDK_INT >= ...` checks, or just stick to the universal set in the example above.
+
+**Already-configured StrictMode.** If the project already calls `StrictMode.setThreadPolicy` / `setVmPolicy` somewhere (often in a debug `Application`), don't double-install — your probe will overwrite the team's setup. Either: (a) sentinel-comment the team's lines, replace with the probe's, restore after; or (b) extend the existing policy instead of replacing it. The cleanup gate (`git diff` against the file) is the safety net either way.
+
+**Java codebase.** The `.detectDiskReads()...build()` chain is identical in Java; only differences are `super.onCreate()` syntax and the `// AGENT_STRICTMODE_<id>:` comment placement. The cleanup grep for the sentinel works the same.
+
 ## The pattern: install → run → read → fix → remove
 
 ### 1. Install temporarily, with `.penaltyLog()` only

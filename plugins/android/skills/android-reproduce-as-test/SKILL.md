@@ -26,6 +26,44 @@ The most common debugging failure is fixing the wrong thing. The agent sees a st
 - One-line typo fixes where the error is obvious from the stack trace
 - Bugs you can't isolate yet — investigate first with `android-probe-logging` or `android-regression-diff-scan`, then come back here
 
+## Pre-flight: detect what your project supports
+
+```bash
+# 1. JUnit version (4 vs 5 — Jupiter)
+grep -rE 'junit:junit|junit-jupiter|junit5' app/build.gradle* gradle/libs.versions.toml 2>/dev/null
+
+# 2. Mocking lib in use (don't introduce a second one)
+grep -rE 'mockk|mockito|mockito-kotlin|mockito-core' app/build.gradle* gradle/libs.versions.toml 2>/dev/null
+
+# 3. Robolectric configured?
+grep -rE 'robolectric' app/build.gradle* gradle/libs.versions.toml 2>/dev/null
+grep -A3 'unitTests' app/build.gradle*
+
+# 4. Instrumentation runner
+grep -E 'testInstrumentationRunner' app/build.gradle*
+
+# 5. Module structure — multi-module projects need a different :module:test invocation
+ls settings.gradle*
+grep -E '^include' settings.gradle* 2>/dev/null | head
+```
+
+**JUnit 4 vs JUnit 5.** Most existing Android projects use JUnit 4 (`org.junit.Test`); newer setups may use Jupiter (`org.junit.jupiter.api.Test`). Match what's already there — mixing is possible but adds complexity. If unsure, look at an existing test in the project.
+
+**Mocking.** Use whatever the project already uses:
+
+| Project uses | Test setup |
+|--------------|------------|
+| MockK (`io.mockk:mockk`) | Pure Kotlin / coroutine-friendly. Default if both libs present. |
+| Mockito-Kotlin (`org.mockito.kotlin:mockito-kotlin`) | Kotlin-friendly Mockito wrappers; works fine with `@Test`. |
+| Mockito plain (`org.mockito:mockito-core`) | Java-style; works with Kotlin but verbose. |
+| Nothing | Don't add a mocking lib for one test — use a hand-rolled fake or a direct constructor injection. |
+
+**Multi-module command shape.** If your test class is in `:feature:login`, the gradle invocation is `./gradlew :feature:login:testDebugUnitTest --tests <FQN>`, not `:app:testDebugUnitTest`. Run `./gradlew projects` to see the module list.
+
+**Java codebase.** All the test-layer tradeoffs are identical; the only thing that changes is the test source language. JUnit `@Test` works the same; Robolectric setup is identical. Mockito (plain) is the natural fit for Java tests.
+
+**Compose UI tests.** If the bug is in a composable, the equivalent of "instrumentation" is `androidx.compose.ui:ui-test-junit4`, with `createAndroidComposeRule`. That's a separate setup from the regular instrumentation runner — `grep ui-test-junit4` to confirm it's wired before writing one.
+
 ## Pick the right test layer
 
 | Layer | When | Speed | Command |

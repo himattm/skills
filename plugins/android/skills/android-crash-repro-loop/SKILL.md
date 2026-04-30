@@ -20,6 +20,35 @@ description: Use to flush out intermittent crashes and ANRs ("it crashes sometim
 - The bug is purely visual / behavioral with no crash — use `android-snapshot-diff`
 - You don't have a hypothesis about the trigger — investigate first with `android-regression-diff-scan` or read recent crash reports
 
+## Pre-flight: detect what your project supports
+
+```bash
+# 1. adb device authorized
+adb devices                              # expect "<id>  device"
+
+# 2. Package and main activity name (the script needs both)
+adb shell pm list packages | grep -i <fragment>
+adb shell cmd package resolve-activity --brief <pkg> | tail -1
+
+# 3. The build is installed (and ideally debuggable so you can see logcat
+#    with full tag visibility)
+adb shell dumpsys package <pkg> | grep -i 'flags=.*DEBUGGABLE'
+```
+
+**Stressors require API-level awareness:**
+
+| Stressor command | Min API |
+|------------------|---------|
+| `settings put system user_rotation` | 17 |
+| `setprop debug.cpu.throttle` | 21 *(some devices ignore on prod builds)* |
+| `am send-trim-memory <pkg> COMPLETE` | 21 |
+| `wm density <dpi>` | 21 |
+| `svc data disable / enable` | always |
+
+**User-debug vs prod build.** Some `setprop` flags are ignored on locked-down production OS images (`ro.build.type=user`). Check `adb shell getprop ro.build.type` — `userdebug` or `eng` images honor the full set; `user` images may silently no-op `debug.cpu.throttle` and others. The `settings put` and `wm` commands work on every build type.
+
+**Skip force-stop if your scenario depends on warm process state.** The default loop force-stops between iterations to test cold-start paths. If your bug only repros warm (e.g. after several swipes during the same process lifetime), drop `am force-stop` from the trigger script and let process state persist.
+
 ## Pattern: clear → loop → drive → watch → stop
 
 ### 1. Pin down the suspected trigger

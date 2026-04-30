@@ -20,6 +20,32 @@ description: Use when you need empirical proof a code path actually executed —
 - The question is "is this code expensive / on which thread?" — use `android-trace-sections`
 - The question is "which of 1000 commits broke it?" — use `android-regression-diff-scan`
 
+## Pre-flight: detect what your project supports
+
+Before instrumenting, confirm two things:
+
+```bash
+# 1. adb is connected and the device is authorized
+adb devices                                    # expect "<id>  device"
+
+# 2. The package builds and installs in debug
+ls app/src/main/java app/src/main/kotlin 2>/dev/null    # which language?
+```
+
+**Language note.** The examples below use Kotlin (`private const val PROBE = ...`). For a Java codebase, the equivalent is:
+
+```java
+private static final String PROBE = "AGENT_PROBE_a4f9c2e1";
+// ...
+Log.d(PROBE, "fetchUser id=" + id + " cached=" + cache.contains(id));
+```
+
+The cleanup grep for `AGENT_PROBE_` catches both forms — sentinel hygiene is language-agnostic.
+
+**Mixed Kotlin/Java module.** Place the constant in whichever language the file you're probing uses; mixing is fine since `String` is `String` on the JVM.
+
+**No Android Log import in the file?** Add `import android.util.Log` (Kotlin) or it's resolvable as `Log.d(...)` once `android.util.Log` is on the classpath (always true for an app module). Lint may flag the import on cleanup — make sure `rg 'AGENT_PROBE_'` is empty before relying on lint, since stale probes can keep an unused import alive.
+
 ## The pattern: probe → run → observe → remove
 
 The shape is non-negotiable. The most common failure mode is leaving probes in committed code. The unique sentinel tag is what makes cleanup tractable.

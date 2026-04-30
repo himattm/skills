@@ -20,6 +20,33 @@ description: Use to flip framework-level diagnostics without code changes — ve
 - The diagnostic needs precise timing — use `android-trace-sections`
 - The diagnostic should ship — that's a permanent change behind `BuildConfig.DEBUG`, not an ephemeral probe
 
+## Pre-flight: detect what your device allows
+
+```bash
+# 1. adb device authorized
+adb devices                              # expect "<id>  device"
+
+# 2. Build type — userdebug/eng images honor every flag; user (production)
+#    images silently no-op some setprops
+adb shell getprop ro.build.type          # expect "userdebug" or "eng"
+
+# 3. Some debug.* properties require root or system_app context — check before
+#    trusting that a flip took
+adb shell getprop ro.debuggable          # 1 = full debug; 0 = production-locked
+```
+
+**On `user` (production) builds**, the following often silently no-op (the `setprop` returns success but the system ignores the value):
+
+- `debug.cpu.throttle` (any value)
+- `debug.hwui.show_layers_updates` (some OEM skins)
+- `debug.atrace.tags.enableflags`
+
+The `settings put global window_animation_scale` family always works because it lives in the Settings provider, not in system properties. `debug.layout` and `log.tag.<Tag>` work everywhere.
+
+**`getprop` returning empty after `setprop`** is a common gotcha — it usually means the property exists but no consumer is reading it on this device. The flag isn't broken on your end; the OS image just doesn't honor it. Try the equivalent flag from the Settings provider, or use `android-trace-sections` for the same diagnostic.
+
+**No root, no userdebug.** That's the common case. Stick to `debug.layout`, `log.tag.<Tag>`, `debug.hwui.profile`, and the `settings put global ..._animation_scale` family — those work on every device.
+
 ## The flag catalog
 
 ### Logging verbosity (per tag)

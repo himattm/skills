@@ -19,6 +19,40 @@ description: Use to find stuck coroutines, leaked jobs, and suspended awaits wit
 - The bug is timing/perf — use `android-trace-sections` (Perfetto shows coroutine dispatches as scheduling events)
 - You haven't confirmed the bug is in coroutine flow — start with `android-probe-logging`
 
+## Pre-flight: detect what your project supports
+
+```bash
+# 1. Project uses kotlinx.coroutines and not some other concurrency primitive
+grep -r 'kotlinx-coroutines-core\|kotlinx-coroutines-android' \
+    app/build.gradle* gradle/libs.versions.toml 2>/dev/null
+
+# 2. Coroutines version (DebugProbes is in coroutines-debug, version-matched)
+grep -E 'kotlinx-coroutines.*([0-9]+\.[0-9]+\.[0-9]+)' \
+    app/build.gradle* gradle/libs.versions.toml 2>/dev/null
+
+# 3. androidx.core version (for ContextCompat.registerReceiver)
+grep -E 'androidx.core' app/build.gradle* gradle/libs.versions.toml 2>/dev/null
+
+# 4. Application subclass exists and is wired in the manifest
+grep -rE 'class\s+\w+\s*:\s*Application|extends\s+Application' \
+    app/src/main/java app/src/main/kotlin 2>/dev/null
+
+# 5. Project's Gradle DSL — Kotlin (.kts) or Groovy (no extension)
+ls app/build.gradle.kts 2>/dev/null && echo "Kotlin DSL" || echo "Groovy DSL"
+```
+
+**Match the coroutines-debug version to your coroutines version.** If your app uses `kotlinx-coroutines-core:1.7.3`, use `kotlinx-coroutines-debug:1.7.3`. Mismatched versions can ABI-clash at runtime (different `Continuation` shape, different debug field layout). The example above shows `1.8.1` — substitute your version.
+
+**Groovy DSL.** Replace the Kotlin DSL line with:
+
+```groovy
+debugImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.8.1'
+```
+
+**No `androidx.core` 1.9+ available.** `ContextCompat.RECEIVER_NOT_EXPORTED` was added in `androidx.core:core 1.9.0`. If your project pins older, either bump it as a `debugImplementation`, or skip the broadcast pattern and dump to `getFilesDir()` + `adb pull` instead — both forms are functionally equivalent for the dump, the receiver is just convenient.
+
+**Java app.** `DebugProbes` works identically from Java; the install call is `DebugProbes.INSTANCE.install()`. Coroutine-level bugs are mostly Kotlin-only, but a Java/Kotlin mixed project benefits from the Kotlin install path even when the suspect coroutine code is in a Kotlin file consumed by Java.
+
 ## Why DebugProbes
 
 `kotlinx-coroutines-debug` ships a `DebugProbes` API that, once installed, tracks every active coroutine — its state (`RUNNING` / `SUSPENDED`), the suspension point's stack, the coroutine's launch-time stack, and parent/child relationships. `DebugProbes.dumpCoroutines()` prints the lot.
