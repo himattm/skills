@@ -28,7 +28,7 @@
     },
     {
       "name": "utilities",
-      "description": "Utility skills: render code snippets as shareable images (code-as-image).",
+      "description": "Utility skills (code-as-image, interrogation) plus session bookmark commands `/checkpoint` and `/resume` for stepping away mid-work and picking up cleanly in a fresh context.",
       "author": {
         "name": "Matt Mckenna"
       },
