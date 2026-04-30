@@ -1,7 +1,7 @@
 {
   "name": "android",
-  "version": "0.2.0",
-  "description": "Android/Compose development skills: project scaffolding, the `android` CLI, screenshot/UI verification, and ephemeral self-debug instrumentation.",
+  "version": "0.3.0",
+  "description": "Android/Compose development skills: project scaffolding, the `android` CLI, screenshot/UI verification, ephemeral self-debug instrumentation, and Perfetto capture/analysis.",
   "author": {
     "name": "Matt Mckenna"
   },

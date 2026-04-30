@@ -67,100 +67,26 @@ try {
 
 **Always pair `begin` with `end` in `finally`.** A missing `endSection` corrupts the trace for the rest of the process.
 
-### 2. Capture a Perfetto trace
+### 2. Capture a Perfetto trace and analyze it
 
-Three options, easiest first:
+Capturing the trace and querying it are separate concerns — covered by dedicated skills:
 
-**Option A: Macrobenchmark / `record_android_trace` script** (cleanest):
+- **`android-perfetto-capture`** — strategies (one-shot host script, on-device long-running, in-app start/stop), data-source selection, capture verification
+- **`android-perfetto-analyze`** — `trace_processor` SQL recipes, including the slice-by-thread query you'll want for `AGENT_TRACE_*` markers
 
-```bash
-# From the Perfetto project:
-curl -O https://raw.githubusercontent.com/google/perfetto/main/tools/record_android_trace
-chmod +x record_android_trace
-./record_android_trace -o /tmp/trace.perfetto-trace -t 10s -b 32mb \
-    sched freq idle am wm gfx view binder_driver hal dalvik \
-    -a com.example.app
-```
-
-The `-a <pkg>` filter limits app-specific data to your package.
-
-**Option B: On-device perfetto** (no host script):
+The minimum viable loop, with the sentinel-aware slice query baked in:
 
 ```bash
-adb shell perfetto -o /data/misc/perfetto-traces/trace.pftrace -t 10s \
-    -c - --txt <<EOF
-buffers { size_kb: 32768 }
-data_sources {
-  config {
-    name: "android.surfaceflinger.frametimeline"
-  }
-}
-data_sources {
-  config {
-    name: "track_event"
-    track_event_config {
-      enabled_categories: "*"
-    }
-  }
-}
-data_sources {
-  config {
-    name: "linux.ftrace"
-    ftrace_config {
-      ftrace_events: "sched/sched_switch"
-      ftrace_events: "power/suspend_resume"
-      atrace_categories: "view"
-      atrace_categories: "gfx"
-      atrace_apps: "com.example.app"
-    }
-  }
-}
-EOF
-
-adb pull /data/misc/perfetto-traces/trace.pftrace /tmp/trace.perfetto-trace
-```
-
-**Option C: Studio Profiler "System Trace"** — interactive but defeats agent automation.
-
-### 3. Drive the suspect flow during capture
-
-Capture runs for the `-t` duration. Trigger your scenario inside that window:
-
-```bash
-./record_android_trace -o /tmp/trace.perfetto-trace -t 10s -a com.example.app &
+# 1. Capture (see android-perfetto-capture for strategy detail)
+/tmp/record_android_trace -o /tmp/trace.perfetto-trace -t 10s -b 32mb \
+    -a com.example.app sched freq am wm gfx view binder_driver dalvik &
+CAPTURE_PID=$!
 sleep 2
-adb shell input tap 540 1200          # the suspect tap
-sleep 2
-# ... drive any other steps ...
-wait                                    # let trace recording finish
-```
+adb shell input tap 540 1200          # drive the suspect flow
+sleep 6
+wait $CAPTURE_PID
 
-### 4. Inspect — open in ui.perfetto.dev
-
-```
-open https://ui.perfetto.dev/
-# Drag /tmp/trace.perfetto-trace into the page
-```
-
-Search the trace UI for `AGENT_TRACE_a4f9c2e1` to jump straight to your slices. Read:
-
-- **Lane** = thread it ran on (look for "main" if you suspected main-thread work)
-- **Slice width** = duration in µs
-- **Frame markers** above the lanes = frame boundaries; a slice that crosses a frame on `main` is a dropped frame
-- **Concurrent slices** in other lanes = what else was happening
-
-For agent-in-the-loop inspection, Perfetto has a SQL backend (`trace_processor`) that can be queried programmatically — see "Programmatic inspection" below for the agent-friendly path.
-
-### 5. Programmatic inspection (sub-agent friendly)
-
-When the agent shouldn't be opening a browser, query via `trace_processor`:
-
-```bash
-# One-time install
-curl -L https://get.perfetto.dev/trace_processor -o /tmp/trace_processor
-chmod +x /tmp/trace_processor
-
-# Run a SQL query
+# 2. Query for your sentinel slices (see android-perfetto-analyze Recipe 1)
 /tmp/trace_processor /tmp/trace.perfetto-trace -q - <<'SQL' > /tmp/trace-results.txt
 SELECT
   s.name,
@@ -175,13 +101,17 @@ ORDER BY s.ts;
 SQL
 ```
 
-The `LEFT JOIN` is required: trace sections wrapped across coroutine boundaries (the `Trace.beginSection` / `endSection` form across `withContext`) sometimes land on async tracks instead of thread tracks. An inner join would silently drop those slices.
+`LEFT JOIN` is required: slices wrapped across coroutine `withContext` boundaries land on async tracks, not thread tracks, and an inner join would silently drop them.
 
-Hand the result file to a Sonnet sub-agent:
+### 3. Delegate the verdict
+
+Hand the (small) result file to a Sonnet sub-agent:
 
 > Read `/tmp/trace-results.txt`. For each AGENT_TRACE slice, return `<label>: <dur_ms>ms on <thread_name>`. Flag any slice on `main` longer than 16ms. Under 60 words. `model: "sonnet"`.
 
-### 6. Cleanup gate (BLOCKING)
+For frame-budget questions, jank attribution, or main-thread breakdowns, see `android-perfetto-analyze` Recipes 2–4.
+
+### 4. Cleanup gate (BLOCKING)
 
 ```bash
 rg 'AGENT_TRACE_'
@@ -235,9 +165,9 @@ If the `io-block` slice lands on the `main` lane, your dispatcher is misconfigur
 |---------|-----|
 | Skipping the cleanup gate | `rg 'AGENT_TRACE_'` must return zero before commit |
 | Missing `endSection` in `try/finally` | Pairs must always close — use `trace { }` lambda form when possible |
-| Capturing without driving the suspect flow during the window | The trace will be empty — start the trace, sleep, trigger the scenario, wait for trace to finish |
-| Reading the full Perfetto trace inline | Use `trace_processor` SQL + Sonnet sub-agent for the slice subset you care about |
 | Generic label like `"work"` | Use `AGENT_TRACE_<id>.<name>` so it's unique in the UI and greppable for cleanup |
 | Confusing slice duration with thread time | Default `dur` is wall time; for CPU time use `tts` (thread timestamp) columns |
-| Tracing without `-a <pkg>` filter | Trace size balloons; filtering to your app keeps it under 32 MB |
-| Forgetting to set buffer size on long captures | Default buffer fills and drops events; use `-b 32mb` or larger |
+| Wrapping the wrong block | Sections need to bracket the work — wrap the call, not just its declaration |
+| Inner JOIN on `thread_track` when querying | Async slices have no thread; use `LEFT JOIN` (see `android-perfetto-analyze`) |
+
+For the capture-side equivalents (no `-a` filter, buffer too small, didn't drive the flow during the window) see `android-perfetto-capture`.
