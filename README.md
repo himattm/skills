@@ -15,10 +15,8 @@ The `himattm` Claude Code plugin marketplace — Matt McKenna's personal skill b
 │   ├── review/            # Pull request review workflows
 │   │   ├── .claude-plugin/plugin.json
 │   │   └── skills/
-│   └── utilities/         # Utility skills + slash commands + hooks
+│   └── utilities/         # Utility skills
 │       ├── .claude-plugin/plugin.json
-│       ├── commands/      # slash commands (e.g. /clear-and-implement)
-│       ├── hooks/         # plugin-installed hooks (e.g. SessionStart)
 │       └── skills/
 ├── references/            # platform tool mappings
 └── README.md
@@ -30,7 +28,7 @@ The `himattm` Claude Code plugin marketplace — Matt McKenna's personal skill b
 |--------|--------|
 | `android@himattm` | `android-cli`, `new-android-app`, `verify-android-layout`, `verify-android-screen` |
 | `review@himattm` | `address-gemini-review`, `review-cycle`, `validate-merge-prs` |
-| `utilities@himattm` | `code-as-image`, `interrogation`, `/clear-and-implement` (slash command + SessionStart hook) |
+| `utilities@himattm` | `code-as-image`, `interrogation` |
 
 ## Usage
 

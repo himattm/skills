@@ -28,7 +28,7 @@
     },
     {
       "name": "utilities",
-      "description": "Utility skills (code-as-image, interrogation) plus the `/clear-and-implement` slash command for seamless plan-to-implementation handoff across a fresh context.",
+      "description": "Utility skills: render code snippets as shareable images (code-as-image).",
       "author": {
         "name": "Matt Mckenna"
       },
