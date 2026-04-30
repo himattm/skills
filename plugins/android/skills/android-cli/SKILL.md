@@ -57,6 +57,20 @@ Two skills cover Android UI verification — pick based on what you need to chec
 
 Reach for `verify-android-layout` first; only escalate to `verify-android-screen` when JSON can't answer the question.
 
+## Investigation / self-debug
+
+When a change isn't behaving and final UI verification can't tell you why, reach for an investigation skill. The shape is always **probe → run → observe → remove** — every probe gets cleaned up before the task is done.
+
+- **`android-probe-logging`** — default. Insert temporary `Log.d` with a unique sentinel tag to confirm a code path runs, see the actual values, and check execution order.
+- **`android-reproduce-as-test`** — default for any non-trivial bug. Write a failing test that captures the bug, fix until green, leave the test as a regression guard.
+- **`android-strictmode-probe`** — silent main-thread I/O, leaked closeables, activity leaks. Catches things that don't crash but cause jank or memory creep.
+- **`android-snapshot-diff`** — capture state at A, act, capture at B, diff. The empirical answer to "did anything actually change?"
+- **`android-regression-diff-scan`** — instead of `git bisect`, hand the full `git diff <good> <bad>` to a sub-agent. Faster than waiting on slow mobile builds.
+- **`android-crash-repro-loop`** — script the trigger sequence and run it 50× to flush out intermittent crashes; inject stress (rotation, slow network, low memory) for races.
+- **`android-trace-sections`** — Perfetto-backed code probes for "did this run, on what thread, for how long?" Reach for this on jank, slow startup, frame-budget questions.
+- **`android-runtime-flag-probe`** — flip framework debug flags via `adb shell setprop` (`debug.layout`, `log.tag.X VERBOSE`, `hwui.profile`) without code changes.
+- **`android-coroutine-trace`** — `DebugProbes` snapshot of every active coroutine. Use when `Log.d` shows `launch` fired but `collect` never received.
+
 ## Managing skills
 
 Manage antigravity agent skills for Android using the `android skills` command.
