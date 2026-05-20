@@ -1,5 +1,10 @@
 #!/usr/bin/env ruby
-# Build _posts/ from plugins/<plugin>/skills/<skill>/SKILL.md sources.
+# Build _posts/ from <plugin>/skills/<skill>/SKILL.md sources.
+#
+# The build workflow runs from a checkout of `main` (which has the three
+# top-level plugin dirs `android/`, `review/`, `utilities/`) with this
+# branch's Jekyll source overlaid on top. SKILL.md files are discovered
+# from those plugin dirs.
 #
 # Each SKILL.md becomes a Chirpy post with:
 #   - title: derived from the first markdown H1 in the body, ignoring lines
@@ -7,7 +12,7 @@
 #     Falls back to the directory slug if no H1 is found.
 #   - date:  the date of the first git commit that introduced the file (with
 #     --follow so renames don't reset history). Falls back to today.
-#   - permalink: /plugins/<plugin>/skills/<skill>/ — mirrors source structure.
+#   - permalink: /<plugin>/skills/<skill>/ — mirrors source structure.
 #   - categories: [<plugin>] — drives Chirpy's auto-archive pages.
 #
 # The transformed _posts/ directory is .gitignored so it only exists at build
@@ -17,7 +22,7 @@ require 'fileutils'
 require 'open3'
 
 POSTS_DIR = '_posts'
-PLUGINS_GLOB = 'plugins/*/skills/*/SKILL.md'
+SKILLS_GLOB = '{android,review,utilities}/skills/*/SKILL.md'
 
 def first_h1_outside_code(body)
   clean = body.gsub(/```[\s\S]*?```/, '')
@@ -39,10 +44,10 @@ FileUtils.rm_rf(POSTS_DIR)
 FileUtils.mkdir_p(POSTS_DIR)
 
 count = 0
-Dir.glob(PLUGINS_GLOB).sort.each do |path|
+Dir.glob(SKILLS_GLOB).sort.each do |path|
   parts = path.split('/')
-  plugin = parts[1]
-  skill = parts[3]
+  plugin = parts[0]
+  skill = parts[2]
 
   raw = File.read(path)
   body = raw.sub(/\A---\s*\n.*?\n---\s*\n/m, '').sub(/\A\s*/, '')
@@ -59,7 +64,7 @@ Dir.glob(PLUGINS_GLOB).sort.each do |path|
     date: #{date}
     categories: [#{plugin}]
     tags: [#{plugin}, skill]
-    permalink: /plugins/#{plugin}/skills/#{skill}/
+    permalink: /#{plugin}/skills/#{skill}/
     toc: true
     pin: false
     ---
