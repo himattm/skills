@@ -28,7 +28,7 @@ The Jekyll source for the published site (https://himattm.github.io/skills/) liv
 | Plugin | Skills |
 |--------|--------|
 | `android@himattm` | `android-cli`, `new-android-app`, `verify-android-layout`, `verify-android-screen`, `android-probe-logging`, `android-reproduce-as-test`, `android-strictmode-probe`, `android-snapshot-diff`, `android-regression-diff-scan`, `android-crash-repro-loop`, `android-trace-sections`, `android-runtime-flag-probe`, `android-coroutine-trace`, `android-perfetto-capture`, `android-perfetto-analyze` |
-| `review@himattm` | `address-gemini-review`, `review-cycle`, `validate-merge-prs` |
+| `review@himattm` | `address-review`, `review-cycle`, `validate-merge-prs` |
 | `utilities@himattm` | `code-as-image`, `interrogation`, `/checkpoint` + `/resume` |
 
 ## Usage
