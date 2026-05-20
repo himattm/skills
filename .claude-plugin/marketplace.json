@@ -18,7 +18,7 @@
     },
     {
       "name": "review",
-      "description": "Pull request review workflows: addressing Gemini feedback, iterative review cycles, and batch PR validation/merging.",
+      "description": "Pull request review workflows: addressing review comments (human or bot), iterative review cycles, and batch PR validation/merging.",
       "author": {
         "name": "Matt Mckenna"
       },
