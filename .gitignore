@@ -9,6 +9,10 @@ Thumbs.db
 *.swo
 *~
 
+# Local agent/editor state
+.claude/
+.codex/
+
 # Docs
 docs/
 
