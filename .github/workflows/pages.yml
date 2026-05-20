@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  repository_dispatch:
+    types: [gh-pages-src-updated]
 
 permissions:
   contents: write
@@ -16,10 +18,23 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout main (plugin content + full git history)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history for plugins like jekyll-archives
+          fetch-depth: 0  # build-posts.rb needs history for per-skill first-commit dates
+
+      - name: Checkout gh-pages-src (Jekyll source)
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages-src
+          path: .site-src
+
+      - name: Overlay Jekyll source onto main checkout
+        run: |
+          shopt -s dotglob
+          # Copy site source into the main worktree, skipping .site-src's own .git
+          rsync -a --exclude='.git' .site-src/ ./
+          rm -rf .site-src
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
@@ -27,7 +42,7 @@ jobs:
           ruby-version: '3.3'
           bundler-cache: true
 
-      - name: Generate _posts/ from plugins/
+      - name: Generate _posts/ from plugin skill sources
         run: ruby bin/build-posts.rb
 
       - name: Jekyll build
