@@ -1,0 +1,263 @@
+<h1 id="android-reproduce-as-test">Android Reproduce-As-Test</h1>
+
+<h2 id="why-this-is-the-default-for-bugs">Why this is the default for bugs</h2>
+
+<p>The most common debugging failure is fixing the wrong thing. The agent sees a stack trace, theorizes a cause, edits a file, redeploys, and declares done — without evidence the change addresses the actual bug. A failing test changes that:</p>
+
+<ul>
+  <li><strong>You can’t fix what you can’t reproduce.</strong> If you can’t write a test that fails for the bug, you don’t yet understand the bug. Stop and investigate first.</li>
+  <li><strong>Pass = proof.</strong> When the test goes red→green on your fix, you have direct evidence the change is causal — not just correlated.</li>
+  <li><strong>The test stays.</strong> It’s now a regression guard. Future refactors will either keep working or fail loudly.</li>
+</ul>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>Any bug with a clear repro path (stack trace, user steps, log line)</li>
+  <li>Logic bugs in pure Kotlin/Java code</li>
+  <li>Framework interactions that Robolectric can simulate</li>
+  <li>Real-device behaviors via instrumentation tests</li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>Pure visual / styling tweaks — use <code class="language-plaintext highlighter-rouge">verify-android-screen</code> to confirm</li>
+  <li>One-line typo fixes where the error is obvious from the stack trace</li>
+  <li>Bugs you can’t isolate yet — investigate first with <code class="language-plaintext highlighter-rouge">android-probe-logging</code> or <code class="language-plaintext highlighter-rouge">android-regression-diff-scan</code>, then come back here</li>
+</ul>
+
+<h2 id="pre-flight-detect-what-your-project-supports">Pre-flight: detect what your project supports</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. JUnit version (4 vs 5 — Jupiter)</span>
+<span class="nb">grep</span> <span class="nt">-rE</span> <span class="s1">'junit:junit|junit-jupiter|junit5'</span> app/build.gradle<span class="k">*</span> gradle/libs.versions.toml 2&gt;/dev/null
+
+<span class="c"># 2. Mocking lib in use (don't introduce a second one)</span>
+<span class="nb">grep</span> <span class="nt">-rE</span> <span class="s1">'mockk|mockito|mockito-kotlin|mockito-core'</span> app/build.gradle<span class="k">*</span> gradle/libs.versions.toml 2&gt;/dev/null
+
+<span class="c"># 3. Robolectric configured?</span>
+<span class="nb">grep</span> <span class="nt">-rE</span> <span class="s1">'robolectric'</span> app/build.gradle<span class="k">*</span> gradle/libs.versions.toml 2&gt;/dev/null
+<span class="nb">grep</span> <span class="nt">-A3</span> <span class="s1">'unitTests'</span> app/build.gradle<span class="k">*</span>
+
+<span class="c"># 4. Instrumentation runner</span>
+<span class="nb">grep</span> <span class="nt">-E</span> <span class="s1">'testInstrumentationRunner'</span> app/build.gradle<span class="k">*</span>
+
+<span class="c"># 5. Module structure — multi-module projects need a different :module:test invocation</span>
+<span class="nb">ls </span>settings.gradle<span class="k">*</span>
+<span class="nb">grep</span> <span class="nt">-E</span> <span class="s1">'^include'</span> settings.gradle<span class="k">*</span> 2&gt;/dev/null | <span class="nb">head</span>
+</code></pre></div></div>
+
+<p><strong>JUnit 4 vs JUnit 5.</strong> Most existing Android projects use JUnit 4 (<code class="language-plaintext highlighter-rouge">org.junit.Test</code>); newer setups may use Jupiter (<code class="language-plaintext highlighter-rouge">org.junit.jupiter.api.Test</code>). Match what’s already there — mixing is possible but adds complexity. If unsure, look at an existing test in the project.</p>
+
+<p><strong>Mocking.</strong> Use whatever the project already uses:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Project uses</th>
+      <th>Test setup</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>MockK (<code class="language-plaintext highlighter-rouge">io.mockk:mockk</code>)</td>
+      <td>Pure Kotlin / coroutine-friendly. Default if both libs present.</td>
+    </tr>
+    <tr>
+      <td>Mockito-Kotlin (<code class="language-plaintext highlighter-rouge">org.mockito.kotlin:mockito-kotlin</code>)</td>
+      <td>Kotlin-friendly Mockito wrappers; works fine with <code class="language-plaintext highlighter-rouge">@Test</code>.</td>
+    </tr>
+    <tr>
+      <td>Mockito plain (<code class="language-plaintext highlighter-rouge">org.mockito:mockito-core</code>)</td>
+      <td>Java-style; works with Kotlin but verbose.</td>
+    </tr>
+    <tr>
+      <td>Nothing</td>
+      <td>Don’t add a mocking lib for one test — use a hand-rolled fake or a direct constructor injection.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Multi-module command shape.</strong> If your test class is in <code class="language-plaintext highlighter-rouge">:feature:login</code>, the gradle invocation is <code class="language-plaintext highlighter-rouge">./gradlew :feature:login:testDebugUnitTest --tests &lt;FQN&gt;</code>, not <code class="language-plaintext highlighter-rouge">:app:testDebugUnitTest</code>. Run <code class="language-plaintext highlighter-rouge">./gradlew projects</code> to see the module list.</p>
+
+<p><strong>Java codebase.</strong> All the test-layer tradeoffs are identical; the only thing that changes is the test source language. JUnit <code class="language-plaintext highlighter-rouge">@Test</code> works the same; Robolectric setup is identical. Mockito (plain) is the natural fit for Java tests.</p>
+
+<p><strong>Compose UI tests.</strong> If the bug is in a composable, the equivalent of “instrumentation” is <code class="language-plaintext highlighter-rouge">androidx.compose.ui:ui-test-junit4</code>, with <code class="language-plaintext highlighter-rouge">createAndroidComposeRule</code>. That’s a separate setup from the regular instrumentation runner — <code class="language-plaintext highlighter-rouge">grep ui-test-junit4</code> to confirm it’s wired before writing one.</p>
+
+<h2 id="pick-the-right-test-layer">Pick the right test layer</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Layer</th>
+      <th>When</th>
+      <th>Speed</th>
+      <th>Command</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>JVM unit</strong> (JUnit + MockK / Mockito)</td>
+      <td>Pure Kotlin/Java logic, ViewModels, repositories with mocked deps</td>
+      <td>Fast (sub-second per test)</td>
+      <td><code class="language-plaintext highlighter-rouge">./gradlew :app:testDebugUnitTest --tests &lt;FQN&gt;</code></td>
+    </tr>
+    <tr>
+      <td><strong>Robolectric</strong></td>
+      <td>Code that uses Android framework classes (Context, Resources, SharedPreferences) but doesn’t need a real device</td>
+      <td>Fast (~1s per test)</td>
+      <td>Same as JVM unit; Robolectric runs on the JVM target</td>
+    </tr>
+    <tr>
+      <td><strong>Instrumentation</strong></td>
+      <td>Real device behavior — UI, lifecycle, IPC, real database</td>
+      <td>Slow (10s+ per test, needs emulator)</td>
+      <td><code class="language-plaintext highlighter-rouge">./gradlew :app:connectedDebugAndroidTest --tests &lt;FQN&gt;</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Default to the fastest layer that can express the bug. Pushing a JVM test up to instrumentation when a mock would do is a common time waster.</p>
+
+<h3 id="robolectric-quick-setup-if-the-project-doesnt-have-it-yet">Robolectric quick-setup (if the project doesn’t have it yet)</h3>
+
+<p>If your bug needs Android framework classes but the project has no Robolectric, ephemerally add it:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// app/build.gradle.kts — under android { ... }</span>
+<span class="nf">testOptions</span> <span class="p">{</span>
+    <span class="nf">unitTests</span> <span class="p">{</span>
+        <span class="n">isIncludeAndroidResources</span> <span class="p">=</span> <span class="k">true</span>   <span class="c1">// Required for Robolectric</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// app/build.gradle.kts — under dependencies { ... }</span>
+<span class="nf">testImplementation</span><span class="p">(</span><span class="s">"org.robolectric:robolectric:4.13"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Annotate the test class:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@RunWith</span><span class="p">(</span><span class="nc">RobolectricTestRunner</span><span class="o">::</span><span class="k">class</span><span class="p">)</span>
+<span class="nd">@Config</span><span class="p">(</span><span class="n">application</span> <span class="p">=</span> <span class="nc">Application</span><span class="o">::</span><span class="k">class</span><span class="p">,</span> <span class="n">sdk</span> <span class="p">=</span> <span class="p">[</span><span class="mi">33</span><span class="p">])</span>
+<span class="kd">class</span> <span class="nc">LoginViewModelTest</span> <span class="p">{</span> <span class="cm">/* ... */</span> <span class="p">}</span>
+</code></pre></div></div>
+
+<p>Use <code class="language-plaintext highlighter-rouge">@Config(application = MyApp::class)</code> if your repro needs your real <code class="language-plaintext highlighter-rouge">Application</code> subclass; pass <code class="language-plaintext highlighter-rouge">Application::class</code> (the framework default) when you don’t. Robolectric defaults <code class="language-plaintext highlighter-rouge">sdk</code> to the project’s <code class="language-plaintext highlighter-rouge">targetSdk</code>; pin it explicitly when the bug is API-level-sensitive. Keep the dependency add scoped to this PR if the rest of the project doesn’t use Robolectric — or coordinate adding it as a permanent dev dependency separately.</p>
+
+<h2 id="workflow">Workflow</h2>
+
+<h3 id="1-name-the-test-for-the-behavior-not-the-symptom">1. Name the test for the behavior, not the symptom</h3>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Bad</span>
+<span class="nd">@Test</span> <span class="k">fun</span> <span class="nf">bug_1234</span><span class="p">()</span>
+
+<span class="c1">// Bad</span>
+<span class="nd">@Test</span> <span class="k">fun</span> <span class="nf">crashOnLogin</span><span class="p">()</span>
+
+<span class="c1">// Good — names the actual broken behavior</span>
+<span class="nd">@Test</span> <span class="k">fun</span> <span class="nf">loginRetainsEmailAfterRotation</span><span class="p">()</span>
+<span class="nd">@Test</span> <span class="k">fun</span> <span class="nf">fetchUserReturnsCachedValueWhenOffline</span><span class="p">()</span>
+<span class="nd">@Test</span> <span class="k">fun</span> <span class="nf">submitButtonDisabledUntilEmailValid</span><span class="p">()</span>
+</code></pre></div></div>
+
+<p>The test name is the bug spec. Future readers should understand the contract from the name alone.</p>
+
+<h3 id="2-write-the-test-so-it-fails-for-the-right-reason">2. Write the test so it fails <em>for the right reason</em></h3>
+
+<p>The test must fail because of the bug, not because of a typo or missing setup. Read the failure output — the assertion message should describe the bug, not “NullPointerException at MyTest.kt:42.”</p>
+
+<p>A common antipattern: writing a passing test, then “fixing” the bug, then claiming success. If the test never failed, it never proved anything.</p>
+
+<h3 id="3-run-the-focused-test-loop">3. Run the focused test loop</h3>
+
+<p>Run only your new test on each iteration — the full suite is wasted time during a fix:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./gradlew :app:testDebugUnitTest <span class="nt">--tests</span> com.example.user.LoginViewModelTest.loginRetainsEmailAfterRotation
+</code></pre></div></div>
+
+<p>For instrumentation:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./gradlew :app:connectedDebugAndroidTest <span class="se">\</span>
+  <span class="nt">-Pandroid</span>.testInstrumentationRunnerArguments.class<span class="o">=</span>com.example.user.LoginFlowTest#emailRetainedAcrossRotation
+</code></pre></div></div>
+
+<h3 id="4-red--green--all-green">4. Red → green → all-green</h3>
+
+<ol>
+  <li>Run the test. It must fail. If it passes, the test is wrong — the bug isn’t where you think it is. Re-investigate.</li>
+  <li>Fix the production code.</li>
+  <li>Run the focused test. It must pass.</li>
+  <li>Run the full suite (<code class="language-plaintext highlighter-rouge">./gradlew :app:testDebugUnitTest</code> and/or <code class="language-plaintext highlighter-rouge">connectedDebugAndroidTest</code>) to confirm no regression elsewhere.</li>
+</ol>
+
+<h3 id="5-cleanup-gate">5. Cleanup gate</h3>
+
+<p>The new test stays — it’s the regression guard. But before declaring done:</p>
+
+<ul>
+  <li>Confirm the test ran on the final code and passed (not just “I think it would”).</li>
+  <li><code class="language-plaintext highlighter-rouge">git status</code> — no scratch files (<code class="language-plaintext highlighter-rouge">/tmp/</code>, commented-out test bodies, <code class="language-plaintext highlighter-rouge">@Ignore</code>d siblings).</li>
+  <li><code class="language-plaintext highlighter-rouge">rg '@Ignore|TODO\(.*test'</code> — no disabled tests left behind.</li>
+  <li>The full suite passes.</li>
+</ul>
+
+<h2 id="anti-patterns">Anti-patterns</h2>
+
+<ul>
+  <li><strong>Test that passes immediately.</strong> If your test is green before the fix, you haven’t reproduced the bug. The test is wrong or the fix isn’t needed.</li>
+  <li><strong>Test that asserts implementation details.</strong> Assert behavior (what the user/caller observes), not internal call counts or private state — those break on every refactor.</li>
+  <li><strong>Multiple bugs, one test.</strong> One test per bug. If you find another bug while fixing this one, write a second test for it.</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">@Ignore</code> instead of fix.</strong> Never disable a failing test. Fix the bug or the test.</li>
+</ul>
+
+<h2 id="sub-agent-usage">Sub-agent usage</h2>
+
+<p>Most of this skill is single-threaded — write, run, read short failure output. Delegate only when:</p>
+
+<ul>
+  <li>The full test suite output is large after your final run. Spawn a Sonnet sub-agent to read <code class="language-plaintext highlighter-rouge">app/build/reports/tests/testDebugUnitTest/index.html</code> (or the equivalent XML in <code class="language-plaintext highlighter-rouge">app/build/test-results/</code>) and report <code class="language-plaintext highlighter-rouge">N passed, M failed</code> plus the first failure’s class + method + message. Under 60 words.</li>
+</ul>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Writing the fix first, then the test</td>
+      <td>Test FIRST. If you can’t write a failing test, you don’t understand the bug. Stop and investigate.</td>
+    </tr>
+    <tr>
+      <td>Test passes on the broken code</td>
+      <td>Re-read the failure (or absence of one) — the test isn’t actually exercising the bug. Refine until it goes red.</td>
+    </tr>
+    <tr>
+      <td>Reaching for instrumentation when a JVM unit test would do</td>
+      <td>Push the bug down to the fastest layer that can express it; instrumentation tests are 10–100× slower</td>
+    </tr>
+    <tr>
+      <td>Running the whole suite each iteration</td>
+      <td>Use <code class="language-plaintext highlighter-rouge">--tests &lt;FQN&gt;</code> to target the one test until it passes; full suite once at the end</td>
+    </tr>
+    <tr>
+      <td>Test name = <code class="language-plaintext highlighter-rouge">bug_1234</code> or <code class="language-plaintext highlighter-rouge">testFoo</code></td>
+      <td>Name it for the contract: <code class="language-plaintext highlighter-rouge">loginRetainsEmailAfterRotation</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">@Ignore</code>ing the failing test to “come back later”</td>
+      <td>Never disable a test instead of fixing it; that’s how regressions ship</td>
+    </tr>
+    <tr>
+      <td>Asserting on <code class="language-plaintext highlighter-rouge">verify(mock).callMethod(any())</code></td>
+      <td>Assert observable behavior, not call counts; behavior survives refactor, mocks don’t</td>
+    </tr>
+    <tr>
+      <td>Skipping the full-suite run after green</td>
+      <td>Your fix may have broken something else; the focused-then-full sequence is the contract</td>
+    </tr>
+  </tbody>
+</table>

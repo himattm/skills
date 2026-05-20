@@ -1,0 +1,244 @@
+<h1 id="android-regression-diff-scan">Android Regression Diff Scan</h1>
+
+<h2 id="why-this-beats-git-bisect-for-mobile">Why this beats <code class="language-plaintext highlighter-rouge">git bisect</code> for mobile</h2>
+
+<p><code class="language-plaintext highlighter-rouge">git bisect</code> exists because humans can’t reason about thousands of lines of change at once. The bisect dance — narrow the range, build, test, narrow again — is a workaround for human context limits.</p>
+
+<p>LLMs don’t share that limit. A sub-agent can read 400K diff lines and spot the suspicious patterns directly.</p>
+
+<p>A motivating example: investigating a regression between two releases with <strong>1,300 commits</strong> and <strong>413,032 lines changed</strong> between them. With 2-minute builds, bisect is ~22 minutes of pure waiting. With 5-minute builds (typical for a real Android app), it’s nearly an hour. A diff scan takes minutes with no builds.</p>
+
+<p>This is the right tool whenever:</p>
+
+<ul>
+  <li>The bug repros in the bad ref but not the good ref</li>
+  <li>Builds are slow (most non-trivial Android projects)</li>
+  <li>You don’t have a reliable repro script for an automated bisect</li>
+  <li>The diff is large enough that human reading would be guesswork</li>
+</ul>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>“It worked in release N, broken in release N+1” — release tag pair</li>
+  <li>“Main works, my feature branch doesn’t” — branch pair</li>
+  <li>“Last week’s build is fine, this week’s crashes” — date-based ref pair</li>
+  <li>Any regression where you have a known-good ref and a known-bad ref</li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>The bug reproduces locally and builds are fast (&lt;1 min) — <code class="language-plaintext highlighter-rouge">git bisect</code> with a script is still the right tool</li>
+  <li>The diff is small (&lt;500 lines) — just read it</li>
+  <li>You don’t have a known-good ref — use <code class="language-plaintext highlighter-rouge">android-probe-logging</code> to investigate from symptoms</li>
+  <li>The bug is non-deterministic and not in changed code — use <code class="language-plaintext highlighter-rouge">android-crash-repro-loop</code> to characterize it first</li>
+</ul>
+
+<h2 id="pre-flight-detect-what-your-repo-supports">Pre-flight: detect what your repo supports</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. The two refs are reachable</span>
+git rev-parse &lt;good&gt; &lt;bad&gt;               <span class="c"># both should resolve to a SHA</span>
+
+<span class="c"># 2. The diff size — sanity-check before generating a multi-MB patch</span>
+git diff <span class="nt">--shortstat</span> &lt;good&gt;..&lt;bad&gt;
+
+<span class="c"># 3. The commit count and span — gives you a rough sense of investigation scope</span>
+git log &lt;good&gt;..&lt;bad&gt; <span class="nt">--oneline</span> | <span class="nb">wc</span> <span class="nt">-l</span>
+git log &lt;good&gt;..&lt;bad&gt; <span class="nt">--format</span><span class="o">=</span><span class="s1">'%ai'</span> | <span class="nb">sort</span> <span class="nt">-u</span> | <span class="nb">head</span> <span class="nt">-1</span>
+git log &lt;good&gt;..&lt;bad&gt; <span class="nt">--format</span><span class="o">=</span><span class="s1">'%ai'</span> | <span class="nb">sort</span> <span class="nt">-u</span> | <span class="nb">tail</span> <span class="nt">-1</span>
+</code></pre></div></div>
+
+<p><strong>If a ref is unreachable</strong>, fetch the relevant remote tags / branches before scanning: <code class="language-plaintext highlighter-rouge">git fetch origin --tags</code>. Working from a shallow clone (CI artifacts, GitHub Codespace) often means missing history — check <code class="language-plaintext highlighter-rouge">git rev-parse --is-shallow-repository</code> and <code class="language-plaintext highlighter-rouge">git fetch --unshallow</code> if true.</p>
+
+<p><strong>Diff size guidance:</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Diff size</th>
+      <th>Strategy</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>&lt; 500 lines</td>
+      <td>Just read it; don’t bother with sub-agent delegation</td>
+    </tr>
+    <tr>
+      <td>500–10K</td>
+      <td>Single sub-agent pass against the full diff</td>
+    </tr>
+    <tr>
+      <td>10K–100K</td>
+      <td>Single sub-agent, but include <code class="language-plaintext highlighter-rouge">--stat</code> and <code class="language-plaintext highlighter-rouge">git log --oneline</code> to give it directory hints</td>
+    </tr>
+    <tr>
+      <td>100K+</td>
+      <td>Split by directory and run scans in parallel; combine the rankings</td>
+    </tr>
+    <tr>
+      <td>1M+</td>
+      <td>The bug brief needs to identify a likely subsystem first; don’t scan a million lines blind</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Vendored / generated code in the diff.</strong> Large auto-generated directories (<code class="language-plaintext highlighter-rouge">generated/</code>, <code class="language-plaintext highlighter-rouge">build/</code>, vendored deps) waste sub-agent attention. Filter them out:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git diff &lt;good&gt;..&lt;bad&gt; <span class="nt">--</span> <span class="s1">':!**/generated/**'</span> <span class="s1">':!**/build/**'</span> <span class="s1">':!**/.gradle/**'</span> <span class="se">\</span>
+    <span class="o">&gt;</span> /tmp/regression-diff.patch
+</code></pre></div></div>
+
+<p><strong>Monorepo with non-Android changes.</strong> Filter to relevant paths early — Android perf bugs rarely live in iOS or web changes:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git diff &lt;good&gt;..&lt;bad&gt; <span class="nt">--</span> <span class="s1">'android/'</span> <span class="s1">'shared/'</span> <span class="s1">'*.kt'</span> <span class="s1">'*.java'</span> <span class="s1">'*.xml'</span> <span class="se">\</span>
+    <span class="o">&gt;</span> /tmp/regression-diff.patch
+</code></pre></div></div>
+
+<h2 id="workflow">Workflow</h2>
+
+<h3 id="1-identify-the-good-and-bad-refs">1. Identify the good and bad refs</h3>
+
+<p>Be precise:</p>
+
+<ul>
+  <li>Release tags: <code class="language-plaintext highlighter-rouge">release_8</code>, <code class="language-plaintext highlighter-rouge">release_9</code></li>
+  <li>Commits: the last commit known to be good, the first commit known to be bad</li>
+  <li>Branches: <code class="language-plaintext highlighter-rouge">main</code> vs <code class="language-plaintext highlighter-rouge">feature/foo</code></li>
+</ul>
+
+<p>If unsure which ref is “good,” confirm by deploying it and checking the symptom is absent. A wrong baseline ref means a wrong scan.</p>
+
+<h3 id="2-size-up-the-change">2. Size up the change</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git diff <span class="nt">--stat</span> &lt;good&gt;..&lt;bad&gt; | <span class="nb">tail</span> <span class="nt">-20</span>
+git log &lt;good&gt;..&lt;bad&gt; <span class="nt">--oneline</span> | <span class="nb">wc</span> <span class="nt">-l</span>
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">--stat</code> summary tells you which files moved most — high-churn files are the first place to look. The commit count is sanity: 50 commits is normal, 1,500 commits means you’re investigating a release.</p>
+
+<h3 id="3-capture-the-artifacts">3. Capture the artifacts</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git diff &lt;good&gt;..&lt;bad&gt; <span class="o">&gt;</span> /tmp/regression-diff.patch
+git log &lt;good&gt;..&lt;bad&gt; <span class="nt">--oneline</span> <span class="o">&gt;</span> /tmp/regression-log.txt
+git diff <span class="nt">--stat</span> &lt;good&gt;..&lt;bad&gt; <span class="o">&gt;</span> /tmp/regression-stat.txt
+</code></pre></div></div>
+
+<p>For huge diffs, also produce focused subsets when you have a domain hint:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># If the bug is in login flow:</span>
+git diff &lt;good&gt;..&lt;bad&gt; <span class="nt">--</span> <span class="s1">'app/src/**/login/**'</span> <span class="s1">'*/auth/**'</span> <span class="o">&gt;</span> /tmp/regression-diff-auth.patch
+
+<span class="c"># If the bug is UI-only:</span>
+git diff &lt;good&gt;..&lt;bad&gt; <span class="nt">--</span> <span class="s1">'*.kt'</span> <span class="s1">'*.xml'</span> <span class="s1">':!**/test/**'</span> <span class="o">&gt;</span> /tmp/regression-diff-ui.patch
+</code></pre></div></div>
+
+<h3 id="4-write-the-bug-brief">4. Write the bug brief</h3>
+
+<p>The sub-agent’s quality depends entirely on the bug description. Capture:</p>
+
+<ul>
+  <li><strong>Symptom</strong> — what the user sees (“crash”, “wrong color”, “button doesn’t respond”)</li>
+  <li><strong>When it appears</strong> — entry point, sequence of actions, conditions (offline, after rotation, on cold start)</li>
+  <li><strong>Evidence</strong> — stack trace if any, log fragment, screenshot description</li>
+  <li><strong>What’s the same</strong> — what’s <em>not</em> changed between good and bad (helps narrow)</li>
+</ul>
+
+<p>Save to <code class="language-plaintext highlighter-rouge">/tmp/regression-bug.md</code>.</p>
+
+<h3 id="5-delegate-to-a-sonnet-sub-agent">5. Delegate to a Sonnet sub-agent</h3>
+
+<p>Spawn the agent with <code class="language-plaintext highlighter-rouge">model: "sonnet"</code> and a self-contained prompt. The diff is the input — never read it in the main thread.</p>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/regression-diff.patch</code>, <code class="language-plaintext highlighter-rouge">/tmp/regression-log.txt</code>, and <code class="language-plaintext highlighter-rouge">/tmp/regression-bug.md</code>.</p>
+
+  <p>The bug described in <code class="language-plaintext highlighter-rouge">regression-bug.md</code> was introduced somewhere in this diff. Identify the <strong>top 3–5 most suspect changes</strong> that could explain it. For each, return:</p>
+
+  <ul>
+    <li>File and line range (<code class="language-plaintext highlighter-rouge">path/to/File.kt:120-145</code>)</li>
+    <li>One-sentence reasoning tying the change to the bug symptom</li>
+    <li>Confidence: high / medium / low</li>
+  </ul>
+
+  <p>Prefer changes that touch: the symptom’s surface area (UI for visual bugs, network for connectivity bugs, etc.), feature-flag conditions, error-handling paths, and lifecycle hooks. Skip cosmetic refactors and dependency bumps unless they directly touch the affected code.</p>
+
+  <p>Under 250 words total.</p>
+</blockquote>
+
+<h3 id="6-investigate-the-surfaced-areas">6. Investigate the surfaced areas</h3>
+
+<p>This skill <strong>finds the haystack, not the needle.</strong> Take the top suspects and verify with instrumentation:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">android-probe-logging</code> — confirm the suspect code path runs and inspect values</li>
+  <li><code class="language-plaintext highlighter-rouge">android-snapshot-diff</code> — confirm state actually changes in the suspect flow</li>
+  <li><code class="language-plaintext highlighter-rouge">android-strictmode-probe</code> — if the bug smells like main-thread / leak</li>
+</ul>
+
+<p>If the top 5 suspects all check out clean, refine the bug brief (it probably needs more detail) or run a focused scan against a different file subset.</p>
+
+<h3 id="7-cleanup-gate">7. Cleanup gate</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">rm</span> /tmp/regression-diff<span class="k">*</span>.patch /tmp/regression-log.txt /tmp/regression-stat.txt /tmp/regression-bug.md
+</code></pre></div></div>
+
+<p>No source touched, so the gate is light. But the patch files can be large — leaving them around bloats <code class="language-plaintext highlighter-rouge">/tmp</code> over an investigation session.</p>
+
+<h2 id="iteration-patterns">Iteration patterns</h2>
+
+<p><strong>Top suspect doesn’t pan out.</strong> Re-prompt the sub-agent with the exclusion: “I checked <code class="language-plaintext highlighter-rouge">path/to/Foo.kt:120-145</code> — it’s not the cause. Re-rank the remaining suspects and add 2 new candidates.”</p>
+
+<p><strong>Diff is too large for one pass.</strong> Split by directory and run scans in parallel against subsets, then combine the rankings:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git diff &lt;good&gt;..&lt;bad&gt; <span class="nt">--</span> <span class="s1">'app/src/main/java/com/example/feature_a/**'</span> <span class="o">&gt;</span> /tmp/regression-diff-a.patch
+git diff &lt;good&gt;..&lt;bad&gt; <span class="nt">--</span> <span class="s1">'app/src/main/java/com/example/feature_b/**'</span> <span class="o">&gt;</span> /tmp/regression-diff-b.patch
+</code></pre></div></div>
+
+<p><strong>No obvious suspects.</strong> The bug may not be in the diff (env / config / data change) or the bug brief is too vague. Don’t escalate to bisect — re-investigate the symptom first.</p>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Reading the diff inline</td>
+      <td>Always delegate to a Sonnet sub-agent — diffs are the entire input</td>
+    </tr>
+    <tr>
+      <td>Letting the sub-agent default to Opus</td>
+      <td>Pass <code class="language-plaintext highlighter-rouge">model: "sonnet"</code> — diff scanning is text comprehension, not reasoning</td>
+    </tr>
+    <tr>
+      <td>Vague bug brief (“it’s broken”)</td>
+      <td>Symptom + when + evidence + what’s the same — quality of brief = quality of suspects</td>
+    </tr>
+    <tr>
+      <td>Wrong baseline ref</td>
+      <td>Confirm the “good” ref actually doesn’t have the symptom before scanning</td>
+    </tr>
+    <tr>
+      <td>Falling back to bisect when one suspect doesn’t pan out</td>
+      <td>Re-prompt the sub-agent excluding the dud; bisect is the <em>last</em> resort, not the second</td>
+    </tr>
+    <tr>
+      <td>Skipping <code class="language-plaintext highlighter-rouge">--stat</code></td>
+      <td>The stat tells you which files moved; high-churn files are first place to look</td>
+    </tr>
+    <tr>
+      <td>Forgetting the commit log</td>
+      <td><code class="language-plaintext highlighter-rouge">git log --oneline</code> gives the sub-agent commit message context — surprisingly useful</td>
+    </tr>
+    <tr>
+      <td>Leaving <code class="language-plaintext highlighter-rouge">/tmp/regression-*</code> patch files</td>
+      <td>They can be huge (100MB+ for big releases); clean up between investigations</td>
+    </tr>
+  </tbody>
+</table>

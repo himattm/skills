@@ -1,0 +1,65 @@
+<p>The user is about to step away. Capture the state of this conversation as a checkpoint file so they (or a future session) can resume without re-exploring everything.</p>
+
+<h2 id="what-to-write">What to write</h2>
+
+<p>A markdown file with this exact shape:</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nn">---</span>
+<span class="na">created</span><span class="pi">:</span> <span class="s">&lt;ISO-8601 UTC timestamp, e.g. 2026-04-29T23:45:12Z&gt;</span>
+<span class="na">repo</span><span class="pi">:</span> <span class="s">&lt;repo name from `basename "$(git rev-parse --show-toplevel 2&gt;/dev/null || pwd)"`&gt;</span>
+<span class="na">branch</span><span class="pi">:</span> <span class="s">&lt;output of `git branch --show-current 2&gt;/dev/null` — empty string if not a git repo&gt;</span>
+<span class="na">slug</span><span class="pi">:</span> <span class="s">&lt;kebab-case slug of the title, ~3-5 words&gt;</span>
+<span class="nn">---</span>
+
+<span class="gh"># &lt;Short title — what we were working on, ~6 words&gt;</span>
+
+<span class="gu">## Goal</span>
+<span class="nt">&lt;</span><span class="err">1–2</span> <span class="na">sentences</span> <span class="na">in</span> <span class="na">user-facing</span> <span class="na">terms</span> <span class="err">—</span> <span class="na">what</span> <span class="na">we</span> <span class="na">were</span> <span class="na">trying</span> <span class="na">to</span> <span class="na">accomplish</span><span class="nt">&gt;</span>
+
+<span class="gu">## What we tried (chronology)</span>
+<span class="p">-</span> <span class="nt">&lt;bullet</span> <span class="err">1</span><span class="na">:</span> <span class="na">thing</span> <span class="na">attempted</span><span class="err">,</span> <span class="na">one</span> <span class="na">line</span><span class="nt">&gt;</span>
+<span class="p">-</span> <span class="nt">&lt;bullet</span> <span class="err">2</span><span class="nt">&gt;</span>
+<span class="p">-</span> <span class="nt">&lt;</span><span class="err">…3–6</span> <span class="na">bullets</span> <span class="na">total</span><span class="err">,</span> <span class="na">in</span> <span class="na">rough</span> <span class="na">order</span><span class="nt">&gt;</span>
+
+<span class="gu">## Key decisions</span>
+<span class="p">-</span> <span class="nt">&lt;bullet:</span> <span class="na">choice</span> <span class="na">made</span> <span class="na">and</span> <span class="na">why</span> <span class="err">—</span> <span class="na">skip</span> <span class="na">section</span> <span class="na">if</span> <span class="na">no</span> <span class="na">real</span> <span class="na">decisions</span><span class="nt">&gt;</span>
+
+<span class="gu">## Files touched</span>
+<span class="p">-</span> <span class="sb">`&lt;path&gt;`</span> — <span class="nt">&lt;one-line</span> <span class="na">role</span><span class="err">,</span> <span class="na">optional</span><span class="nt">&gt;</span>
+<span class="p">-</span> <span class="sb">`&lt;path&gt;`</span>
+<span class="p">-</span> <span class="nt">&lt;</span><span class="err">…</span><span class="nt">&gt;</span>
+
+<span class="gu">## Blockers / open questions</span>
+<span class="p">-</span> <span class="nt">&lt;thing</span> <span class="na">stuck</span> <span class="na">on</span> <span class="na">or</span> <span class="na">needing</span> <span class="na">user</span> <span class="na">input</span> <span class="err">—</span> <span class="na">skip</span> <span class="na">section</span> <span class="na">if</span> <span class="na">none</span><span class="nt">&gt;</span>
+
+<span class="gu">## Next concrete step</span>
+<span class="nt">&lt;</span><span class="err">1–3</span> <span class="na">sentences:</span> <span class="na">the</span> <span class="na">very</span> <span class="na">next</span> <span class="na">action</span> <span class="na">when</span> <span class="na">we</span> <span class="na">resume.</span> <span class="na">Be</span> <span class="na">specific</span> <span class="err">—</span> <span class="na">name</span> <span class="na">files</span><span class="err">,</span> <span class="na">commands</span><span class="err">,</span> <span class="na">what</span> <span class="err">"</span><span class="na">done</span><span class="err">"</span> <span class="na">looks</span> <span class="na">like</span> <span class="na">for</span> <span class="na">this</span> <span class="na">step.</span><span class="nt">&gt;</span>
+<span class="p">
+---
+</span>
+<span class="gu">## To resume in a fresh window, paste this:</span>
+
+<span class="p">```</span><span class="nl">text
+</span>Read the checkpoint at &lt;ABSOLUTE PATH OF THIS FILE&gt; and continue from the "Next concrete step" section. Don't re-plan or re-ask for context — the checkpoint has what you need.
+<span class="p">```</span>
+</code></pre></div></div>
+
+<p>The triple-backtick <code class="language-plaintext highlighter-rouge">text</code> block above is part of the checkpoint file you’ll write — keep it as a real fenced code block in the output.</p>
+
+<h2 id="procedure">Procedure</h2>
+
+<ol>
+  <li><strong>Compute the path.</strong> Working directory is the repo root (or wherever the user invoked from). Path = <code class="language-plaintext highlighter-rouge">.claude/checkpoints/&lt;UTC-timestamp&gt;-&lt;slug&gt;.md</code> where timestamp is <code class="language-plaintext highlighter-rouge">YYYYMMDDTHHMMSSZ</code> (compact, sortable). <code class="language-plaintext highlighter-rouge">mkdir -p .claude/checkpoints/</code> first.</li>
+  <li><strong>Introspect the conversation.</strong> Pull from your conversation memory — what was the user’s goal, what tool calls happened, what files were edited, what was decided, what’s the immediate next step? Be honest about blockers.</li>
+  <li><strong>Write the file</strong> with the Write tool. Compute the absolute path (via <code class="language-plaintext highlighter-rouge">pwd</code> joined with the relative path) and embed it in the resume paste-block at the bottom — the paste-block must be self-contained.</li>
+  <li><strong>Print to chat:</strong> the absolute file path, then the full body of the file inline, then this exact line: <code class="language-plaintext highlighter-rouge">Saved. Type /clear, then /resume in the fresh session — or paste the block above.</code></li>
+  <li><strong>Stop.</strong> Do not start new work. Do not ask follow-ups.</li>
+</ol>
+
+<h2 id="notes">Notes</h2>
+
+<ul>
+  <li>Do NOT touch <code class="language-plaintext highlighter-rouge">.gitignore</code>. The user has explicitly opted to manage that themselves.</li>
+  <li>If the conversation has too little material to checkpoint meaningfully (e.g., user just opened the session), say so and ask if they still want a checkpoint before writing one.</li>
+  <li>The checkpoint is per-repo. Don’t try to merge state across multiple working directories.</li>
+</ul>

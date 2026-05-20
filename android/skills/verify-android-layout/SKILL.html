@@ -1,0 +1,223 @@
+<h1 id="verify-android-ui-via-layout-json">Verify Android UI via Layout JSON</h1>
+
+<h2 id="why-this-is-the-default">Why this is the default</h2>
+
+<p><code class="language-plaintext highlighter-rouge">android layout</code> returns the entire on-screen UI as a structured JSON tree. For most verification — “did the button appear?”, “is the input focused?”, “did the count increment?”, “is the error visible?” — JSON is <strong>strictly better than a screenshot</strong>:</p>
+
+<ul>
+  <li>Cheaper: text tokens, not vision tokens</li>
+  <li>Precise: exact resource ids and bounds, no fuzzy reading</li>
+  <li>Diffable: <code class="language-plaintext highlighter-rouge">--diff</code> returns only what changed since the last call</li>
+  <li>Greppable: a sub-agent can answer “is element X present” in one pass</li>
+</ul>
+
+<p><strong>Default to this skill. Reach for <code class="language-plaintext highlighter-rouge">verify-android-screen</code> only when JSON can’t answer the question</strong> (WebView content, animations, visual fidelity, image content).</p>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>Confirming a screen rendered (specific text, resource ids, or controls present)</li>
+  <li>Verifying input state (<code class="language-plaintext highlighter-rouge">focused</code>, <code class="language-plaintext highlighter-rouge">checked</code>, <code class="language-plaintext highlighter-rouge">selected</code>)</li>
+  <li>Checking interactions are available (<code class="language-plaintext highlighter-rouge">clickable</code>, <code class="language-plaintext highlighter-rouge">scrollable</code>, etc.)</li>
+  <li>Observing a fix in the running app (element appears/disappears, text updates)</li>
+  <li>Iterating in a tight loop where you’ve already seen the screen once</li>
+  <li>Driving input — taps, swipes, text entry — using element coordinates</li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>WebView content — won’t appear in the layout tree</li>
+  <li>Animations in flight — <code class="language-plaintext highlighter-rouge">layout</code> may fail or return partial state</li>
+  <li>Visual-only checks — colors, fonts, image content, alignment polish</li>
+  <li>Locating an element by visual appearance when you don’t know its id</li>
+</ul>
+
+<p>For those, use <code class="language-plaintext highlighter-rouge">verify-android-screen</code>.</p>
+
+<h2 id="the-json-shape">The JSON shape</h2>
+
+<p>Each element in the layout tree may include:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Property</th>
+      <th>Meaning</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">text</code></td>
+      <td>Literal text the element contains</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">resourceId</code></td>
+      <td>The Android resource id used to refer to the element</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">contentDesc</code></td>
+      <td>Accessibility description</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">class</code></td>
+      <td>Android view class (e.g. <code class="language-plaintext highlighter-rouge">android.widget.Button</code>)</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">interactions</code></td>
+      <td>What the user can do: <code class="language-plaintext highlighter-rouge">checkable</code>, <code class="language-plaintext highlighter-rouge">clickable</code>, <code class="language-plaintext highlighter-rouge">focusable</code>, <code class="language-plaintext highlighter-rouge">scrollable</code>, <code class="language-plaintext highlighter-rouge">long-clickable</code>, <code class="language-plaintext highlighter-rouge">password</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">state</code></td>
+      <td>Current state: <code class="language-plaintext highlighter-rouge">checked</code>, <code class="language-plaintext highlighter-rouge">focused</code>, <code class="language-plaintext highlighter-rouge">selected</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">bounds</code></td>
+      <td>Bounding rectangle as <code class="language-plaintext highlighter-rouge">[minX,minY][maxX,maxY]</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">center</code></td>
+      <td>Center point as <code class="language-plaintext highlighter-rouge">[x,y]</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">off-screen</code></td>
+      <td>True if in the hierarchy but not currently visible — may need a scroll</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Example:</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"key"</span><span class="p">:</span><span class="w"> </span><span class="mi">-248568265</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"class"</span><span class="p">:</span><span class="w"> </span><span class="s2">"android.widget.Button"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"text"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Submit"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"bounds"</span><span class="p">:</span><span class="w"> </span><span class="s2">"[138,9][167,38]"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"center"</span><span class="p">:</span><span class="w"> </span><span class="s2">"[152,23]"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"interactions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"clickable"</span><span class="p">,</span><span class="w"> </span><span class="s2">"focusable"</span><span class="p">]</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<h2 id="workflow">Workflow</h2>
+
+<h3 id="first-look--full-layout">First look — full layout</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>android layout <span class="nt">--pretty</span> <span class="nt">-o</span> /tmp/layout.json
+</code></pre></div></div>
+
+<p>If the file is under ~50 lines, read it inline. Otherwise, <strong>delegate to a sub-agent</strong> (see below).</p>
+
+<h3 id="iteration--diff-only">Iteration — diff only</h3>
+
+<p>After the first call, use <code class="language-plaintext highlighter-rouge">--diff</code> to get only the elements that changed:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>android layout <span class="nt">--diff</span> <span class="nt">--pretty</span> <span class="nt">-o</span> /tmp/layout-diff.json
+</code></pre></div></div>
+
+<p>This is the single biggest context saver. A calculator key press should return a one-element diff, not the whole tree.</p>
+
+<h3 id="delegating-large-dumps">Delegating large dumps</h3>
+
+<p>When the dump is &gt;50 lines (most real screens), spawn a sub-agent with <code class="language-plaintext highlighter-rouge">model: "sonnet"</code> and a self-contained prompt:</p>
+
+<ul>
+  <li>Exact file path to read</li>
+  <li>Specific criteria — what should be present, what shouldn’t, which <code class="language-plaintext highlighter-rouge">resourceId</code> or <code class="language-plaintext highlighter-rouge">text</code> to find</li>
+  <li>Expected return format (“YES/NO + one sentence”, “under 40 words”, or “return the <code class="language-plaintext highlighter-rouge">center</code> of the element with text=’Submit’”)</li>
+</ul>
+
+<p>Do NOT read the dump in the main thread.</p>
+
+<h2 id="example-sub-agent-prompts">Example sub-agent prompts</h2>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/layout.json</code>. Find an element with <code class="language-plaintext highlighter-rouge">text="Sign in"</code>. Return its <code class="language-plaintext highlighter-rouge">center</code> coordinate as <code class="language-plaintext highlighter-rouge">[x,y]</code>, or “NOT FOUND” if absent. Under 20 words.</p>
+</blockquote>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/layout-diff.json</code>. Verify the readout element (<code class="language-plaintext highlighter-rouge">resourceId</code> containing <code class="language-plaintext highlighter-rouge">display</code>) now shows <code class="language-plaintext highlighter-rouge">text="42"</code>. Answer YES/NO + one sentence on what it actually shows.</p>
+</blockquote>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/layout.json</code>. Confirm: (a) an EditText with <code class="language-plaintext highlighter-rouge">state</code> containing <code class="language-plaintext highlighter-rouge">focused</code>, (b) a Button with <code class="language-plaintext highlighter-rouge">text="Submit"</code> and <code class="language-plaintext highlighter-rouge">interactions</code> containing <code class="language-plaintext highlighter-rouge">clickable</code>. Under 40 words: did both pass? If not, what’s actually there?</p>
+</blockquote>
+
+<h2 id="driving-input-from-layout-coordinates">Driving input from layout coordinates</h2>
+
+<p>Once you have a <code class="language-plaintext highlighter-rouge">center</code> or <code class="language-plaintext highlighter-rouge">bounds</code>, drive <code class="language-plaintext highlighter-rouge">adb shell input</code> directly.</p>
+
+<p><strong>Tap</strong> the center of an element:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell input tap 152 23
+</code></pre></div></div>
+
+<p><strong>Swipe / scroll</strong> a scrollable element. The 5th argument is duration in ms — keep it generous (500ms+) so the gesture is interpreted as a scroll, not a fling:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell input swipe 250 400 250 100 500
+</code></pre></div></div>
+
+<p><strong>Type into an input.</strong> Always confirm <code class="language-plaintext highlighter-rouge">state</code> contains <code class="language-plaintext highlighter-rouge">focused</code> before typing — if it isn’t, tap the element first:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell input text <span class="s2">"hello%sworld"</span>
+</code></pre></div></div>
+
+<p>(Use <code class="language-plaintext highlighter-rouge">%s</code> for spaces in <code class="language-plaintext highlighter-rouge">input text</code>.)</p>
+
+<h2 id="interaction-rules">Interaction rules</h2>
+
+<ol>
+  <li><strong>Text inputs must be focused before typing.</strong> Check <code class="language-plaintext highlighter-rouge">state</code> contains <code class="language-plaintext highlighter-rouge">focused</code>; if not, <code class="language-plaintext highlighter-rouge">adb shell input tap</code> the element first, then re-dump and verify focus.</li>
+  <li><strong>If an element has <code class="language-plaintext highlighter-rouge">scrollable</code> in its <code class="language-plaintext highlighter-rouge">interactions</code>,</strong> try scrolling it when looking for an off-screen element. <code class="language-plaintext highlighter-rouge">off-screen: true</code> on a target is a strong signal you need to scroll its container.</li>
+  <li><strong>Scroll slowly.</strong> A short-duration swipe is interpreted as a fling and overshoots. Use 500ms+ for predictable scrolling.</li>
+  <li><strong>Content takes time to load.</strong> If a <code class="language-plaintext highlighter-rouge">layout</code> call is missing expected information after an action, wait a couple of seconds and call <code class="language-plaintext highlighter-rouge">layout --diff</code> to see what arrived.</li>
+</ol>
+
+<h2 id="recovery--when-layout-fails">Recovery — when <code class="language-plaintext highlighter-rouge">layout</code> fails</h2>
+
+<p><code class="language-plaintext highlighter-rouge">android layout</code> can fail on WebViews or mid-animation. Two fallbacks:</p>
+
+<ol>
+  <li>Wait a moment and retry with <code class="language-plaintext highlighter-rouge">--diff</code> (animation may finish)</li>
+  <li>Switch to <code class="language-plaintext highlighter-rouge">verify-android-screen</code> with <code class="language-plaintext highlighter-rouge">--annotate</code> to find elements visually, then resolve to coordinates</li>
+</ol>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Reaching for a screenshot first</td>
+      <td>JSON is the default; screenshots are the fallback</td>
+    </tr>
+    <tr>
+      <td>Reading a 500-line layout dump inline</td>
+      <td>Always delegate dumps &gt;50 lines to a Sonnet sub-agent</td>
+    </tr>
+    <tr>
+      <td>Not using <code class="language-plaintext highlighter-rouge">--diff</code> in iteration loops</td>
+      <td>The full tree on every step is wasted context — <code class="language-plaintext highlighter-rouge">--diff</code> gives you only what changed</td>
+    </tr>
+    <tr>
+      <td>Typing into an unfocused input</td>
+      <td>Always verify <code class="language-plaintext highlighter-rouge">state</code> contains <code class="language-plaintext highlighter-rouge">focused</code> first; tap to focus if not</td>
+    </tr>
+    <tr>
+      <td>Fast swipes that fling instead of scroll</td>
+      <td>Use a duration of 500ms+ on <code class="language-plaintext highlighter-rouge">adb shell input swipe</code></td>
+    </tr>
+    <tr>
+      <td>Vague sub-agent criteria (“does it look right?”)</td>
+      <td>Name the <code class="language-plaintext highlighter-rouge">resourceId</code>, <code class="language-plaintext highlighter-rouge">text</code>, or <code class="language-plaintext highlighter-rouge">state</code> to check, and cap the response length</td>
+    </tr>
+    <tr>
+      <td>Letting the sub-agent default to Opus</td>
+      <td>Always pass <code class="language-plaintext highlighter-rouge">model: "sonnet"</code> — the task is narrow text parsing</td>
+    </tr>
+  </tbody>
+</table>

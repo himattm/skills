@@ -1,0 +1,285 @@
+<h1 id="android-strictmode-probe">Android StrictMode Probe</h1>
+
+<h2 id="why-strictmode-catches-what-nothing-else-does">Why StrictMode catches what nothing else does</h2>
+
+<p>StrictMode is the only built-in tool that fires for the <strong>silent killers</strong> — operations that don’t throw but ruin perceived performance:</p>
+
+<ul>
+  <li>Disk I/O on the main thread</li>
+  <li>Network calls on the main thread</li>
+  <li>Leaked SQLite cursors, file streams, registered receivers</li>
+  <li>Activity / fragment leaks</li>
+  <li>Untagged sockets</li>
+</ul>
+
+<p>A <code class="language-plaintext highlighter-rouge">Log.d</code> probe won’t surface these. An espresso test won’t fail. The app runs — just badly. StrictMode logs each violation with a stack trace pointing at the exact call.</p>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>“The app feels slow on cold start” — likely main-thread I/O during <code class="language-plaintext highlighter-rouge">Application.onCreate</code> or first activity</li>
+  <li>“Scrolling janks once” — likely lazy disk read on the main thread</li>
+  <li>“Memory grows across rotations” — likely activity leak via static reference, listener, or executor</li>
+  <li>Before shipping a new feature that touches storage, prefs, network, or long-lived listeners</li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>The bug crashes — use <code class="language-plaintext highlighter-rouge">android-probe-logging</code> or read <code class="language-plaintext highlighter-rouge">adb logcat *:E</code></li>
+  <li>The bug is in pure Kotlin logic — use <code class="language-plaintext highlighter-rouge">android-reproduce-as-test</code></li>
+  <li>The question is “did this code run?” — use <code class="language-plaintext highlighter-rouge">android-probe-logging</code></li>
+</ul>
+
+<h2 id="pre-flight-detect-what-your-project-supports">Pre-flight: detect what your project supports</h2>
+
+<p>Before installing the probe, confirm:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. There's an Application subclass to install StrictMode in</span>
+<span class="nb">grep</span> <span class="nt">-rE</span> <span class="s1">'class\s+\w+\s*:\s*Application|extends\s+Application'</span> <span class="se">\</span>
+    app/src/main/java app/src/main/kotlin 2&gt;/dev/null
+<span class="c"># Expect at least one match. If empty, the project uses the default</span>
+<span class="c"># android.app.Application — you'll need to create a subclass and wire</span>
+<span class="c"># it via android:name in AndroidManifest.xml before installing the probe.</span>
+
+<span class="c"># 2. The manifest declares it</span>
+<span class="nb">grep</span> <span class="s1">'android:name'</span> app/src/main/AndroidManifest.xml
+
+<span class="c"># 3. minSdk — affects which detect* methods are available</span>
+<span class="nb">grep</span> <span class="nt">-E</span> <span class="s1">'minSdk'</span> app/build.gradle<span class="k">*</span> gradle/libs.versions.toml 2&gt;/dev/null
+</code></pre></div></div>
+
+<p><strong>API-level gates.</strong> Most <code class="language-plaintext highlighter-rouge">.detect*</code> methods are available from API 21+; the more recent ones gate at higher levels:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Method</th>
+      <th>Min API</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">detectUnsafeIntentLaunch</code></td>
+      <td>31</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">detectIncorrectContextUse</code></td>
+      <td>31</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">detectImplicitDirectBoot</code></td>
+      <td>29</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">detectCredentialProtectedWhileLocked</code></td>
+      <td>29</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">detectNonSdkApiUsage</code></td>
+      <td>28</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>If your project’s <code class="language-plaintext highlighter-rouge">minSdk</code> is below the level where a method is available, the call will compile but <code class="language-plaintext highlighter-rouge">NoSuchMethodError</code> at runtime on older devices. Wrap newer methods with <code class="language-plaintext highlighter-rouge">Build.VERSION.SDK_INT &gt;= ...</code> checks, or just stick to the universal set in the example above.</p>
+
+<p><strong>Already-configured StrictMode.</strong> If the project already calls <code class="language-plaintext highlighter-rouge">StrictMode.setThreadPolicy</code> / <code class="language-plaintext highlighter-rouge">setVmPolicy</code> somewhere (often in a debug <code class="language-plaintext highlighter-rouge">Application</code>), don’t double-install — your probe will overwrite the team’s setup. Either: (a) sentinel-comment the team’s lines, replace with the probe’s, restore after; or (b) extend the existing policy instead of replacing it. The cleanup gate (<code class="language-plaintext highlighter-rouge">git diff</code> against the file) is the safety net either way.</p>
+
+<p><strong>Java codebase.</strong> The <code class="language-plaintext highlighter-rouge">.detectDiskReads()...build()</code> chain is identical in Java; only differences are <code class="language-plaintext highlighter-rouge">super.onCreate()</code> syntax and the <code class="language-plaintext highlighter-rouge">// AGENT_STRICTMODE_&lt;id&gt;:</code> comment placement. The cleanup grep for the sentinel works the same.</p>
+
+<h2 id="the-pattern-install--run--read--fix--remove">The pattern: install → run → read → fix → remove</h2>
+
+<h3 id="1-install-temporarily-with-penaltylog-only">1. Install temporarily, with <code class="language-plaintext highlighter-rouge">.penaltyLog()</code> only</h3>
+
+<p>At the top of <code class="language-plaintext highlighter-rouge">Application.onCreate</code>, before your own initialization:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">override</span> <span class="k">fun</span> <span class="nf">onCreate</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">super</span><span class="p">.</span><span class="nf">onCreate</span><span class="p">()</span>
+
+    <span class="c1">// AGENT_STRICTMODE_&lt;id&gt;: temporary probe — remove before commit</span>
+    <span class="nc">StrictMode</span><span class="p">.</span><span class="nf">setThreadPolicy</span><span class="p">(</span>
+        <span class="nc">StrictMode</span><span class="p">.</span><span class="nc">ThreadPolicy</span><span class="p">.</span><span class="nc">Builder</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">detectDiskReads</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">detectDiskWrites</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">detectNetwork</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">detectCustomSlowCalls</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">penaltyLog</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">build</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="nc">StrictMode</span><span class="p">.</span><span class="nf">setVmPolicy</span><span class="p">(</span>
+        <span class="nc">StrictMode</span><span class="p">.</span><span class="nc">VmPolicy</span><span class="p">.</span><span class="nc">Builder</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">detectLeakedSqlLiteObjects</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">detectLeakedClosableObjects</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">detectLeakedRegistrationObjects</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">detectActivityLeaks</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">detectFileUriExposure</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">penaltyLog</span><span class="p">()</span>
+            <span class="p">.</span><span class="nf">build</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="c1">// ... existing init ...</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Critical rules:</strong></p>
+
+<ul>
+  <li><strong>Always <code class="language-plaintext highlighter-rouge">.penaltyLog()</code>. Never <code class="language-plaintext highlighter-rouge">.penaltyDeath()</code> for a probe</strong> — death penalty crashes the app on first violation, which masks every later one.</li>
+  <li><strong>Mark the block with a sentinel comment</strong> (<code class="language-plaintext highlighter-rouge">AGENT_STRICTMODE_&lt;id&gt;</code>) so the cleanup grep finds it.</li>
+  <li><strong>Install at the top of <code class="language-plaintext highlighter-rouge">Application.onCreate</code></strong> so it covers your own init code. Note: <code class="language-plaintext highlighter-rouge">ContentProvider.onCreate</code> runs <em>before</em> <code class="language-plaintext highlighter-rouge">Application.onCreate</code> and won’t be caught here — if you suspect violations during ContentProvider init (Room, WorkManager initializers, etc.), install in <code class="language-plaintext highlighter-rouge">attachBaseContext</code> instead, or add a <code class="language-plaintext highlighter-rouge">Configuration.Provider</code> with StrictMode set up before initialization.</li>
+</ul>
+
+<h3 id="2-drive-the-suspect-flow">2. Drive the suspect flow</h3>
+
+<p>Cold-start the app for cold-start violations. For specific flows, navigate to the screen / trigger the action that you suspect.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb logcat <span class="nt">-c</span>
+android run                              <span class="c"># cold start</span>
+<span class="c"># ... drive the suspect flow ...</span>
+adb logcat <span class="nt">-d</span> <span class="nt">-s</span> StrictMode <span class="o">&gt;</span> /tmp/strictmode-&lt;<span class="nb">id</span><span class="o">&gt;</span>.log
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">-s StrictMode</code> filter captures every policy violation with stack.</p>
+
+<h3 id="3-read-the-violations">3. Read the violations</h3>
+
+<p>Each violation looks like:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>StrictMode policy violation; ~duration=120 ms: android.os.strictmode.DiskReadViolation
+    at android.os.StrictMode$AndroidBlockGuardPolicy.onReadFromDisk
+    at java.io.UnixFileSystem.checkAccess
+    at java.io.File.exists
+    at com.example.app.ConfigLoader.loadFromCache(ConfigLoader.kt:42)
+    at com.example.app.MyApplication.onCreate(MyApplication.kt:18)
+</code></pre></div></div>
+
+<p>Look for:</p>
+
+<ul>
+  <li>The violation type (<code class="language-plaintext highlighter-rouge">DiskReadViolation</code>, <code class="language-plaintext highlighter-rouge">NetworkViolation</code>, <code class="language-plaintext highlighter-rouge">LeakedClosableViolation</code>, <code class="language-plaintext highlighter-rouge">InstanceCountViolation</code> for activity leaks).</li>
+  <li>The first frame inside <em>your</em> package — that’s where to fix.</li>
+  <li><code class="language-plaintext highlighter-rouge">~duration=</code> — anything over a few ms on the main thread is jank-relevant.</li>
+</ul>
+
+<p>For multi-violation logs (&gt;30 lines), delegate to a Sonnet sub-agent:</p>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/strictmode-&lt;id&gt;.log</code>. Group violations by type and first project-package frame. Return the top 3 unique violations with <code class="language-plaintext highlighter-rouge">file:line</code> and the violation class. Under 80 words. <code class="language-plaintext highlighter-rouge">model: "sonnet"</code>.</p>
+</blockquote>
+
+<h3 id="4-fix-each-violation">4. Fix each violation</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Violation</th>
+      <th>Typical fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">DiskReadViolation</code> / <code class="language-plaintext highlighter-rouge">DiskWriteViolation</code> on main</td>
+      <td>Move to <code class="language-plaintext highlighter-rouge">Dispatchers.IO</code> coroutine, <code class="language-plaintext highlighter-rouge">WorkManager</code>, or <code class="language-plaintext highlighter-rouge">LifecycleScope</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">NetworkViolation</code> on main</td>
+      <td>Move to a coroutine on <code class="language-plaintext highlighter-rouge">Dispatchers.IO</code>, or use OkHttp/Ktor async</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">LeakedClosableViolation</code></td>
+      <td>Wrap in <code class="language-plaintext highlighter-rouge">use { }</code> or close in a <code class="language-plaintext highlighter-rouge">finally</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">LeakedRegistrationObjects</code></td>
+      <td>Unregister receivers / listeners in <code class="language-plaintext highlighter-rouge">onDestroy</code> / <code class="language-plaintext highlighter-rouge">onStop</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">InstanceCountViolation</code> (activity leak)</td>
+      <td>Find the static / singleton holding the activity ref; usually a callback registered without unregister</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Re-run after each fix until logcat is clean.</p>
+
+<h3 id="5-cleanup-gate-blocking">5. Cleanup gate (BLOCKING)</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rg <span class="s1">'AGENT_STRICTMODE_'</span>
+git diff app/src/main/java/.../MyApplication.kt
+</code></pre></div></div>
+
+<p>Both must show that the temporary <code class="language-plaintext highlighter-rouge">setThreadPolicy</code> / <code class="language-plaintext highlighter-rouge">setVmPolicy</code> block is <strong>completely removed</strong>. If the project already had a debug-only StrictMode setup, restore it to its pre-probe state — the diff against <code class="language-plaintext highlighter-rouge">git</code> should be exactly the lines you didn’t touch.</p>
+
+<p>If the project <em>should</em> have StrictMode behind <code class="language-plaintext highlighter-rouge">BuildConfig.DEBUG</code> permanently, that’s a separate change — propose it explicitly, don’t smuggle it in under the probe.</p>
+
+<h2 id="scoping-the-probe">Scoping the probe</h2>
+
+<p>When the violation log is overwhelming (cold start can produce 100+), narrow:</p>
+
+<p><strong>Scope to one suspect operation</strong> with <code class="language-plaintext highlighter-rouge">permitAll()</code> baseline + targeted detect:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nc">StrictMode</span><span class="p">.</span><span class="nf">setThreadPolicy</span><span class="p">(</span>
+    <span class="nc">StrictMode</span><span class="p">.</span><span class="nc">ThreadPolicy</span><span class="p">.</span><span class="nc">Builder</span><span class="p">()</span>
+        <span class="p">.</span><span class="nf">permitAll</span><span class="p">()</span>
+        <span class="p">.</span><span class="nf">detectDiskReads</span><span class="p">()</span>
+        <span class="p">.</span><span class="nf">penaltyLog</span><span class="p">()</span>
+        <span class="p">.</span><span class="nf">build</span><span class="p">()</span>
+<span class="p">)</span>
+</code></pre></div></div>
+
+<p><strong>Wrap a single suspect block</strong> with <code class="language-plaintext highlighter-rouge">allowThreadDiskReads</code> / <code class="language-plaintext highlighter-rouge">allowThreadDiskWrites</code> to confirm a specific call is the offender:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">val</span> <span class="py">original</span> <span class="p">=</span> <span class="nc">StrictMode</span><span class="p">.</span><span class="nf">allowThreadDiskReads</span><span class="p">()</span>
+<span class="k">try</span> <span class="p">{</span>
+    <span class="nf">suspectCall</span><span class="p">()</span>
+<span class="p">}</span> <span class="k">finally</span> <span class="p">{</span>
+    <span class="nc">StrictMode</span><span class="p">.</span><span class="nf">setThreadPolicy</span><span class="p">(</span><span class="n">original</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>If wrapping silences the violation, you found it.</p>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Skipping the cleanup gate</td>
+      <td><code class="language-plaintext highlighter-rouge">rg 'AGENT_STRICTMODE_'</code> must return zero before commit; the temporary block must be fully removed</td>
+    </tr>
+    <tr>
+      <td>Using <code class="language-plaintext highlighter-rouge">.penaltyDeath()</code></td>
+      <td>Crashes on first violation, masks later ones — always <code class="language-plaintext highlighter-rouge">.penaltyLog()</code> for a probe</td>
+    </tr>
+    <tr>
+      <td>Installing after <code class="language-plaintext highlighter-rouge">super.onCreate()</code></td>
+      <td>Misses framework-level violations during app init; install first</td>
+    </tr>
+    <tr>
+      <td>Reading 100+ violation logcat inline</td>
+      <td>Delegate to a Sonnet sub-agent with grouping criteria</td>
+    </tr>
+    <tr>
+      <td>Fixing the first violation, declaring done</td>
+      <td>Re-run after each fix — fixes often unmask later violations</td>
+    </tr>
+    <tr>
+      <td>Smuggling permanent StrictMode in under “probe” cleanup</td>
+      <td>Probe = remove. Permanent debug StrictMode is a separate, explicit change</td>
+    </tr>
+    <tr>
+      <td>Wrapping production code in <code class="language-plaintext highlighter-rouge">allowThreadDiskReads</code> to “silence”</td>
+      <td>That’s hiding the bug, not fixing it; move the work off the main thread</td>
+    </tr>
+    <tr>
+      <td>Forgetting to clear <code class="language-plaintext highlighter-rouge">adb logcat -c</code> before the run</td>
+      <td>Mixes prior-run violations into the diagnosis</td>
+    </tr>
+  </tbody>
+</table>

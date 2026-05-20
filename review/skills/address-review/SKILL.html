@@ -1,0 +1,195 @@
+<p>Fetch, validate, triage, and address PR review comments from any reviewer — humans or automated bots. Core principle: <strong>skeptical triage, not blind compliance.</strong> Reviewers (especially bots) often lack cross-file context and project history — treat their suggestions as hints, not instructions.</p>
+
+<p>Read <code class="language-plaintext highlighter-rouge">references/github-api-patterns.md</code> for exact <code class="language-plaintext highlighter-rouge">gh api</code> commands, field names, and reply formats.</p>
+
+<h2 id="workflow">Workflow</h2>
+
+<h3 id="1-detect-pr-and-author-filter">1. Detect PR and Author Filter</h3>
+
+<ul>
+  <li>
+    <p><strong>PR</strong>: Use <code class="language-plaintext highlighter-rouge">$ARGUMENTS</code> if provided (e.g., <code class="language-plaintext highlighter-rouge">/address-review 82</code> or <code class="language-plaintext highlighter-rouge">/address-review 82 coderabbitai[bot]</code> or <code class="language-plaintext highlighter-rouge">/address-review 82 alice</code>). Otherwise auto-detect:</p>
+
+    <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>gh <span class="nb">pr </span>view <span class="nt">--json</span> number <span class="nt">--jq</span> <span class="s1">'.number'</span>
+</code></pre></div>    </div>
+
+    <p>Fail clearly if no PR is found.</p>
+  </li>
+  <li>
+    <p><strong>Author filter</strong>: If a login is passed as the second argument, filter to that login (works for bots like <code class="language-plaintext highlighter-rouge">coderabbitai[bot]</code> or humans like <code class="language-plaintext highlighter-rouge">alice</code>). Otherwise default to <strong>all reviewers</strong> on the PR — the triage table makes it easy to scope down after the fact.</p>
+  </li>
+</ul>
+
+<h3 id="2-fetch-review-comments">2. Fetch Review Comments</h3>
+
+<p>Run both calls from the reference file (inline comments + formal reviews). Filter by the login(s) from step 1. Skip comments where <code class="language-plaintext highlighter-rouge">in_reply_to_id</code> is set (those are replies, not original comments).</p>
+
+<p><strong>If zero comments found, say so and stop.</strong> No further action needed.</p>
+
+<h3 id="3-parse-and-categorize">3. Parse and Categorize</h3>
+
+<p>For each comment, extract: <code class="language-plaintext highlighter-rouge">id</code>, <code class="language-plaintext highlighter-rouge">path</code>, <code class="language-plaintext highlighter-rouge">line</code>, <code class="language-plaintext highlighter-rouge">start_line</code>, <code class="language-plaintext highlighter-rouge">body</code>, <code class="language-plaintext highlighter-rouge">user.login</code> (who said it), severity (if encoded), and any suggestion block. Group by file path.</p>
+
+<p>Severity conventions vary — see the reference file. Bots typically encode badges/emoji; humans use cues like <code class="language-plaintext highlighter-rouge">nit:</code>, <code class="language-plaintext highlighter-rouge">question:</code>, <code class="language-plaintext highlighter-rouge">blocking:</code>, or plain prose. When nothing is encoded, treat as <code class="language-plaintext highlighter-rouge">medium</code>.</p>
+
+<h3 id="4-validate-and-triage">4. Validate and Triage</h3>
+
+<p>For each comment, <strong>read the actual file</strong> at the referenced lines. Then evaluate:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Question</th>
+      <th>If No</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Is the comment technically correct about the current code?</td>
+      <td>DISMISS</td>
+    </tr>
+    <tr>
+      <td>Is the suggestion syntactically and semantically correct?</td>
+      <td>DISMISS the suggestion (may still FIX differently)</td>
+    </tr>
+    <tr>
+      <td>Is this worth the churn? (severity vs effort vs risk)</td>
+      <td>DISMISS</td>
+    </tr>
+    <tr>
+      <td>Does it conflict with existing architecture or project conventions?</td>
+      <td>DISMISS</td>
+    </tr>
+    <tr>
+      <td>Does it require human judgment (trade-off, product decision)?</td>
+      <td>DISCUSS</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Apply <code class="language-plaintext highlighter-rouge">receiving-code-review</code> skepticism:</p>
+<ul>
+  <li><strong>YAGNI check</strong>: Is the reviewer suggesting defensive code for impossible states?</li>
+  <li><strong>Cross-file blindness</strong>: Does the reviewer see the full picture, or just this file? (Especially relevant for bots.)</li>
+  <li><strong>Platform compat</strong>: Is the suggestion actually better, or just different?</li>
+</ul>
+
+<p>Weight human feedback more heavily than bot feedback by default — humans usually have context bots lack — but apply the same triage rubric to both.</p>
+
+<p>Assign each comment: <strong>FIX</strong> / <strong>DISMISS</strong> / <strong>DISCUSS</strong></p>
+
+<h3 id="5-present-triage-summary--hard-gate">5. Present Triage Summary — HARD GATE</h3>
+
+<p>Present a table:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>| # | Author             | File       | Line | Severity | Verdict | Reason |
+|---|--------------------|------------|------|----------|---------|--------|
+| 1 | gemini-code-assist | src/foo.ts | 42   | medium   | FIX     | Redundant sort — suggestion is correct |
+| 2 | alice              | src/bar.ts | 18   | blocking | FIX     | Missing null check on user-supplied input |
+| 3 | coderabbitai       | src/baz.ts | 7    | nitpick  | DISMISS | Already handled by upstream validator |
+</code></pre></div></div>
+
+<p>Then for each comment, show the comment body (truncated), your analysis, and verdict rationale.</p>
+
+<p><strong>ASK THE USER</strong>: “These are my proposed verdicts. Approve, or tell me which to change.”</p>
+
+<p><strong>DO NOT implement anything until the user explicitly approves.</strong> This gate is non-negotiable.</p>
+
+<h3 id="6-implement-fixes">6. Implement Fixes</h3>
+
+<p>For approved FIX items only:</p>
+<ul>
+  <li>If the reviewer provided a correct suggestion block, apply it directly</li>
+  <li>Otherwise, write the fix independently based on your own analysis</li>
+  <li>Run the project’s test suite after all fixes are applied</li>
+</ul>
+
+<h3 id="7-reply-to-every-comment">7. Reply to Every Comment</h3>
+
+<p>Reply to <strong>every</strong> comment — including dismissed ones. The path differs by author type:</p>
+
+<p><strong>Bot comments</strong> (<code class="language-plaintext highlighter-rouge">*[bot]</code> logins): post directly using the reply endpoint from the reference file. The step 5 triage gate is sufficient approval.</p>
+
+<p><strong>Human comments</strong>: confirm each reply with the user before posting. For every human comment, call <code class="language-plaintext highlighter-rouge">AskUserQuestion</code>:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">question</code>: include the author, <code class="language-plaintext highlighter-rouge">path:line</code>, a short snippet of their comment, and your proposed reply text</li>
+  <li><code class="language-plaintext highlighter-rouge">header</code>: e.g. <code class="language-plaintext highlighter-rouge">Reply 1/3</code> (keep under 12 chars)</li>
+  <li><code class="language-plaintext highlighter-rouge">options</code>:
+    <ul>
+      <li><code class="language-plaintext highlighter-rouge">{label: "Post this reply", description: "Send the proposed text as shown", preview: "&lt;full proposed reply text&gt;"}</code></li>
+      <li><code class="language-plaintext highlighter-rouge">{label: "Skip this comment", description: "Don't reply to this thread"}</code></li>
+    </ul>
+  </li>
+</ul>
+
+<p>The tool auto-adds an “Other” option so the user can type a custom reply. Send whichever text they pick via the endpoint from the reference file; if they choose Skip, leave the thread untouched.</p>
+
+<p>Reply templates (starting point for both bot and human; the user may override for humans):</p>
+
+<ul>
+  <li><strong>FIX</strong>: <code class="language-plaintext highlighter-rouge">"Fixed in {sha}. {what changed}."</code></li>
+  <li><strong>DISMISS</strong>: <code class="language-plaintext highlighter-rouge">"Not applicable — {technical reason}."</code></li>
+  <li><strong>DISCUSS</strong>: <code class="language-plaintext highlighter-rouge">"Flagged for discussion — {why}."</code></li>
+</ul>
+
+<p>No performative language. No “Great catch!” No “Thanks for the suggestion!” Just the technical substance — same standard for humans and bots.</p>
+
+<h3 id="8-commit">8. Commit</h3>
+
+<p>Single commit for all fixes: <code class="language-plaintext highlighter-rouge">fix: address review on PR #{number}</code></p>
+
+<p>If all comments were dismissed (no code changes), skip the commit — replies are sufficient.</p>
+
+<h2 id="common-mistakes">Common Mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Implementing before triage approval</td>
+      <td>The hard gate at step 5 exists for a reason — wait</td>
+    </tr>
+    <tr>
+      <td>Blindly applying suggestion blocks</td>
+      <td>Suggestions can be wrong. Validate against the actual code</td>
+    </tr>
+    <tr>
+      <td>Creating new top-level comments instead of thread replies</td>
+      <td>Use the <code class="language-plaintext highlighter-rouge">/replies</code> endpoint, not <code class="language-plaintext highlighter-rouge">/comments</code></td>
+    </tr>
+    <tr>
+      <td>Hardcoding owner/repo</td>
+      <td>Always detect dynamically via <code class="language-plaintext highlighter-rouge">gh repo view</code></td>
+    </tr>
+    <tr>
+      <td>Hardcoding a single author filter</td>
+      <td>Default to all reviewers; let the user narrow via argument</td>
+    </tr>
+    <tr>
+      <td>Performative reply language</td>
+      <td>Direct and technical only — same standard for humans and bots</td>
+    </tr>
+    <tr>
+      <td>Skipping replies for dismissed comments</td>
+      <td>Every comment gets a reply — paper trail matters</td>
+    </tr>
+    <tr>
+      <td>Treating all comments equally</td>
+      <td>Severity + reviewer context + your own judgment determine priority</td>
+    </tr>
+    <tr>
+      <td>Trusting bot suggestions over human review</td>
+      <td>Humans usually have project context bots lack — weight accordingly</td>
+    </tr>
+    <tr>
+      <td>Auto-posting replies to humans</td>
+      <td>Always confirm human replies via <code class="language-plaintext highlighter-rouge">AskUserQuestion</code> first — bots can post directly after step 5</td>
+    </tr>
+  </tbody>
+</table>

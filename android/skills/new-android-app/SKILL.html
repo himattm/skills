@@ -1,0 +1,316 @@
+<h1 id="create-a-new-android-app">Create a new Android app</h1>
+
+<p>Scaffolds a single-module Android app with a locked-in stack, then verifies it builds, tests, and lints cleanly. The end state is an empty scaffold (no demo screens) ready for the user to write their first Circuit feature.</p>
+
+<h2 id="what-this-skill-produces">What this skill produces</h2>
+
+<ul>
+  <li>Single-module app at <code class="language-plaintext highlighter-rouge">&lt;output&gt;/&lt;appNameSnake&gt;/</code></li>
+  <li>Compose-only, Circuit-native nav, blank start screen</li>
+  <li>Metro DI graph, Material You theme, edge-to-edge, Core SplashScreen, predictive back</li>
+  <li>Coil 3 <code class="language-plaintext highlighter-rouge">ImageLoader</code> provided through Metro, kermit logger, Ktor client</li>
+  <li>Crashlytics pre-wired, gated on <code class="language-plaintext highlighter-rouge">app/google-services.json</code> presence</li>
+  <li><code class="language-plaintext highlighter-rouge">runDebug</code> / <code class="language-plaintext highlighter-rouge">runRelease</code> / <code class="language-plaintext highlighter-rouge">runDebugAll</code> / <code class="language-plaintext highlighter-rouge">runReleaseAll</code> Gradle tasks</li>
+  <li><code class="language-plaintext highlighter-rouge">AGENTS.md</code> (real file) + <code class="language-plaintext highlighter-rouge">CLAUDE.md</code> (symlink)</li>
+  <li><code class="language-plaintext highlighter-rouge">.github/workflows/ci.yml</code>, detekt + ktlint, Roborazzi screenshot tests</li>
+  <li>Commit <code class="language-plaintext highlighter-rouge">Initial scaffold via new-android-app skill</code></li>
+</ul>
+
+<h2 id="workflow">Workflow</h2>
+
+<div class="language-dot highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">digraph</span> <span class="nv">workflow</span> <span class="p">{</span>
+    <span class="nv">inputs</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Collect inputs"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">verify</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Verify environment"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">base</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"android create\nbase scaffold"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">apply</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Apply opinionated stack\n(copy references, substitute)"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">sym</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"ln -s AGENTS.md CLAUDE.md"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">smoke</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"assembleDebug + testDebugUnitTest\n+ detekt + lintDebug"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">ok</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"green?"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">diamond</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">git</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"git init + initial commit"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">report</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Print next steps"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">doublecircle</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">fail</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Surface error\nleave partial scaffold"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">doublecircle</span><span class="o">]</span><span class="p">;</span>
+
+    <span class="nv">inputs</span> <span class="o">-&gt;</span> <span class="nv">verify</span> <span class="o">-&gt;</span> <span class="nv">base</span> <span class="o">-&gt;</span> <span class="nv">apply</span> <span class="o">-&gt;</span> <span class="nv">sym</span> <span class="o">-&gt;</span> <span class="nv">smoke</span> <span class="o">-&gt;</span> <span class="nv">ok</span><span class="p">;</span>
+    <span class="nv">ok</span> <span class="o">-&gt;</span> <span class="nv">git</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"yes"</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">ok</span> <span class="o">-&gt;</span> <span class="nv">fail</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"no"</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">git</span> <span class="o">-&gt;</span> <span class="nv">report</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="step-1--collect-inputs">Step 1 — Collect inputs</h3>
+
+<p>Ask the user, one prompt at a time:</p>
+
+<ol>
+  <li><strong>App display name</strong> (e.g. <code class="language-plaintext highlighter-rouge">Halogen</code>).</li>
+  <li><strong>Package name</strong> (e.g. <code class="language-plaintext highlighter-rouge">me.mmckenna.halogen</code>). Validate against <code class="language-plaintext highlighter-rouge">^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$</code>. Reject and re-prompt on failure.</li>
+  <li><strong>Output directory</strong> (default: current working directory).</li>
+  <li><strong>Min SDK</strong> (default: 26).</li>
+  <li><strong>Initialize git?</strong> (default: yes).</li>
+</ol>
+
+<p>Derive:</p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">appNameSnake</code> = display name lowercased, non-alphanumerics → <code class="language-plaintext highlighter-rouge">_</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">packagePath</code> = package name with <code class="language-plaintext highlighter-rouge">.</code> → <code class="language-plaintext highlighter-rouge">/</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">targetSdk</code> = highest installed platform from <code class="language-plaintext highlighter-rouge">android sdk list --installed</code>.</li>
+</ul>
+
+<h3 id="step-2--verify-environment">Step 2 — Verify environment</h3>
+
+<p>Run, in this order, and stop on the first failure with a user-facing message:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>which android         <span class="c"># android CLI present?</span>
+java <span class="nt">-version</span>         <span class="c"># JDK 21+?</span>
+android sdk list <span class="nt">--installed</span>    <span class="c"># at least one platform + build-tools?</span>
+</code></pre></div></div>
+
+<p>If <code class="language-plaintext highlighter-rouge">android</code> is missing, point the user at the <code class="language-plaintext highlighter-rouge">android-cli</code> skill’s setup notes. If JDK is missing or older, suggest <code class="language-plaintext highlighter-rouge">sdkman install java 21-tem</code> or equivalent.</p>
+
+<h3 id="step-3--scaffold-base-via-android-create">Step 3 — Scaffold base via <code class="language-plaintext highlighter-rouge">android create</code></h3>
+
+<p>Pick the simplest Compose-capable template. Run <code class="language-plaintext highlighter-rouge">android create --list</code> if unsure. Default template: <strong><code class="language-plaintext highlighter-rouge">empty-activity</code></strong>.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>android create empty-activity <span class="nt">--name</span><span class="o">=</span><span class="s2">"&lt;App Display Name&gt;"</span> <span class="nt">--output</span><span class="o">=</span>&lt;output&gt; <span class="nt">--minSdk</span><span class="o">=</span>&lt;minSdk&gt;
+</code></pre></div></div>
+
+<p>This produces a buildable starting point. The next step heavily overwrites it.</p>
+
+<h3 id="step-4--apply-the-opinionated-stack">Step 4 — Apply the opinionated stack</h3>
+
+<p>For each entry below, copy the file from <code class="language-plaintext highlighter-rouge">references/</code> to its target path, substituting <code class="language-plaintext highlighter-rouge">,</code>, <code class="language-plaintext highlighter-rouge">,</code>, <code class="language-plaintext highlighter-rouge">,</code>. Files marked <code class="language-plaintext highlighter-rouge">verbatim</code> copy without substitution.</p>
+
+<p><strong>Build &amp; tooling:</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Reference</th>
+      <th>Target</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">settings.gradle.kts.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">settings.gradle.kts</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">root.build.gradle.kts</code> (verbatim)</td>
+      <td><code class="language-plaintext highlighter-rouge">build.gradle.kts</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">libs.versions.toml</code> (verbatim)</td>
+      <td><code class="language-plaintext highlighter-rouge">gradle/libs.versions.toml</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">app.build.gradle.kts.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">app/build.gradle.kts</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">run-tasks.gradle.kts</code> (verbatim)</td>
+      <td><code class="language-plaintext highlighter-rouge">gradle/run-tasks.gradle.kts</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">build-logic/</code> (whole tree, with placeholder substitution in <code class="language-plaintext highlighter-rouge">convention/build.gradle.kts</code>)</td>
+      <td><code class="language-plaintext highlighter-rouge">build-logic/</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">gitignore</code> (verbatim)</td>
+      <td><code class="language-plaintext highlighter-rouge">.gitignore</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">editorconfig</code> (verbatim)</td>
+      <td><code class="language-plaintext highlighter-rouge">.editorconfig</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">detekt.yml</code> (verbatim)</td>
+      <td><code class="language-plaintext highlighter-rouge">config/detekt/detekt.yml</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">ci.yml</code> (verbatim)</td>
+      <td><code class="language-plaintext highlighter-rouge">.github/workflows/ci.yml</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">google-services.json.example</code> (verbatim)</td>
+      <td><code class="language-plaintext highlighter-rouge">app/google-services.json.example</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>App source (under <code class="language-plaintext highlighter-rouge">app/src/main/kotlin//</code>):</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Reference</th>
+      <th>Target</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">App.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">App.kt</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">MainActivity.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">MainActivity.kt</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">AppGraph.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">di/AppGraph.kt</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">CircuitConfig.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">circuit/CircuitConfig.kt</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">RootScreen.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">nav/RootScreen.kt</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">Color.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">ui/theme/Color.kt</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">Type.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">ui/theme/Type.kt</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">Theme.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">ui/theme/Theme.kt</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">AndroidManifest.xml.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">app/src/main/AndroidManifest.xml</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Tests (under <code class="language-plaintext highlighter-rouge">app/src/test/kotlin//</code>):</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Reference</th>
+      <th>Target</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">ExampleTest.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">ExampleTest.kt</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">RootPresenterTest.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">nav/RootPresenterTest.kt</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">ThemeScreenshotTest.kt.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">ui/theme/ThemeScreenshotTest.kt</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Agent guidance:</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Reference</th>
+      <th>Target</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">AGENTS.md.tmpl</code></td>
+      <td><code class="language-plaintext highlighter-rouge">AGENTS.md</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Splash theme</strong>: the manifest references <code class="language-plaintext highlighter-rouge">@style/Theme..Splash</code>. Append the following style to <code class="language-plaintext highlighter-rouge">app/src/main/res/values/themes.xml</code> (the <code class="language-plaintext highlighter-rouge">android create</code> template generates a base <code class="language-plaintext highlighter-rouge">themes.xml</code>):</p>
+
+<div class="language-xml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nt">&lt;style</span> <span class="na">name=</span><span class="s">"Theme..Splash"</span> <span class="na">parent=</span><span class="s">"android:Theme.Material.Light.NoActionBar"</span> <span class="nt">/&gt;</span>
+</code></pre></div></div>
+
+<p>After all files are written, delete every leftover source the <code class="language-plaintext highlighter-rouge">android create</code> template generated. The defaults conflict with the new structure (e.g. <code class="language-plaintext highlighter-rouge">com.example.&lt;app&gt;.MainScreenViewModelTest</code> referencing classes that no longer exist). Run:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Drop default sources outside our package. Use `find` with `! -path` so the new files we just wrote are kept.</span>
+find <span class="s2">"</span><span class="nv">$APP_DIR</span><span class="s2">/app/src/main/java"</span>   <span class="nt">-mindepth</span> 1 <span class="nt">-delete</span> 2&gt;/dev/null <span class="o">||</span> <span class="nb">true
+</span>find <span class="s2">"</span><span class="nv">$APP_DIR</span><span class="s2">/app/src/main/kotlin"</span> <span class="nt">-mindepth</span> 1 <span class="o">!</span> <span class="nt">-path</span> <span class="s2">"</span><span class="nv">$APP_DIR</span><span class="s2">/app/src/main/kotlin/</span><span class="nv">$PKG_PATH</span><span class="s2">*"</span> <span class="nt">-delete</span> 2&gt;/dev/null <span class="o">||</span> <span class="nb">true
+</span>find <span class="s2">"</span><span class="nv">$APP_DIR</span><span class="s2">/app/src/test/java"</span>   <span class="nt">-mindepth</span> 1 <span class="nt">-delete</span> 2&gt;/dev/null <span class="o">||</span> <span class="nb">true
+</span>find <span class="s2">"</span><span class="nv">$APP_DIR</span><span class="s2">/app/src/test/kotlin"</span> <span class="nt">-mindepth</span> 1 <span class="o">!</span> <span class="nt">-path</span> <span class="s2">"</span><span class="nv">$APP_DIR</span><span class="s2">/app/src/test/kotlin/</span><span class="nv">$PKG_PATH</span><span class="s2">*"</span> <span class="nt">-delete</span> 2&gt;/dev/null <span class="o">||</span> <span class="nb">true
+</span>find <span class="s2">"</span><span class="nv">$APP_DIR</span><span class="s2">/app/src/androidTest/java"</span>   <span class="nt">-mindepth</span> 1 <span class="nt">-delete</span> 2&gt;/dev/null <span class="o">||</span> <span class="nb">true
+</span>find <span class="s2">"</span><span class="nv">$APP_DIR</span><span class="s2">/app/src/androidTest/kotlin"</span> <span class="nt">-mindepth</span> 1 <span class="o">!</span> <span class="nt">-path</span> <span class="s2">"</span><span class="nv">$APP_DIR</span><span class="s2">/app/src/androidTest/kotlin/</span><span class="nv">$PKG_PATH</span><span class="s2">*"</span> <span class="nt">-delete</span> 2&gt;/dev/null <span class="o">||</span> <span class="nb">true</span>
+</code></pre></div></div>
+
+<h3 id="step-5--create-the-claudemd-symlink">Step 5 — Create the CLAUDE.md symlink</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">cd</span> &lt;output&gt;/&lt;appNameSnake&gt;
+<span class="nb">ln</span> <span class="nt">-s</span> AGENTS.md CLAUDE.md
+</code></pre></div></div>
+
+<p>Verify with <code class="language-plaintext highlighter-rouge">ls -la CLAUDE.md</code> showing <code class="language-plaintext highlighter-rouge">CLAUDE.md -&gt; AGENTS.md</code>.</p>
+
+<h3 id="step-6--sanity-build">Step 6 — Sanity build</h3>
+
+<p>Run, in order, with <code class="language-plaintext highlighter-rouge">-q --console=plain</code>:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./gradlew <span class="nt">-q</span> <span class="nt">--console</span><span class="o">=</span>plain :app:assembleDebug
+./gradlew <span class="nt">-q</span> <span class="nt">--console</span><span class="o">=</span>plain :app:testDebugUnitTest
+./gradlew <span class="nt">-q</span> <span class="nt">--console</span><span class="o">=</span>plain :app:detekt :app:lintDebug
+</code></pre></div></div>
+
+<p>If any step fails:</p>
+<ol>
+  <li>Print the failing task and the last ~50 lines of output.</li>
+  <li>Stop without committing.</li>
+  <li>Tell the user the partial scaffold is at <code class="language-plaintext highlighter-rouge">&lt;output&gt;/&lt;appNameSnake&gt;</code> for inspection.</li>
+</ol>
+
+<h3 id="step-7--initialize-git-if-requested">Step 7 — Initialize git (if requested)</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">cd</span> &lt;output&gt;/&lt;appNameSnake&gt;
+git init
+git add <span class="nb">.</span>
+git commit <span class="nt">-m</span> <span class="s2">"Initial scaffold via new-android-app skill"</span>
+</code></pre></div></div>
+
+<p>If <code class="language-plaintext highlighter-rouge">git init</code> fails, warn but do not roll back the scaffold.</p>
+
+<h3 id="step-8--report-next-steps">Step 8 — Report next steps</h3>
+
+<p>Print to the user:</p>
+
+<blockquote>
+  <p>Scaffold complete at <code class="language-plaintext highlighter-rouge">&lt;output&gt;/&lt;appNameSnake&gt;</code>.</p>
+
+  <p>Next steps:</p>
+
+  <ol>
+    <li><strong>Add Crashlytics:</strong> Create a Firebase project, download <code class="language-plaintext highlighter-rouge">google-services.json</code>, and drop it in <code class="language-plaintext highlighter-rouge">app/</code>. See <code class="language-plaintext highlighter-rouge">AGENTS.md</code> for details.</li>
+    <li><strong>Run on a device:</strong> <code class="language-plaintext highlighter-rouge">./gradlew runDebug</code> (single device) or <code class="language-plaintext highlighter-rouge">./gradlew runDebugAll</code> (all connected).</li>
+    <li><strong>Add your first feature:</strong> Follow the “Adding a feature” recipe in <code class="language-plaintext highlighter-rouge">AGENTS.md</code>. Use <code class="language-plaintext highlighter-rouge">circuit-test</code> for the presenter.</li>
+    <li><strong>Use the <code class="language-plaintext highlighter-rouge">android-cli</code> skill</strong> for SDK / device / docs operations.</li>
+    <li><strong>Use the upstream <code class="language-plaintext highlighter-rouge">edge-to-edge</code> skill from the <code class="language-plaintext highlighter-rouge">android</code> CLI</strong> if you hit inset or system-bar issues when adding real screens.</li>
+  </ol>
+</blockquote>
+
+<h2 id="composes-with">Composes with</h2>
+
+<ul>
+  <li><strong><code class="language-plaintext highlighter-rouge">android-cli</code></strong> — used in steps 2 and 3, surfaced in step 8’s next steps.</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">edge-to-edge</code> (from the upstream <code class="language-plaintext highlighter-rouge">android</code> CLI)</strong> — referenced in <code class="language-plaintext highlighter-rouge">AGENTS.md</code> and step 8 as the canonical guide for inset issues.</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">superpowers:test-driven-development</code></strong> — recommended for adding new features (TDD-first via <code class="language-plaintext highlighter-rouge">circuit-test</code>).</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">superpowers:verification-before-completion</code></strong> — step 6 is the verification gate.</li>
+</ul>
+
+<h2 id="failure-modes">Failure modes</h2>
+
+<ul>
+  <li><strong><code class="language-plaintext highlighter-rouge">android create</code> fails:</strong> surface stderr, suggest <code class="language-plaintext highlighter-rouge">android sdk list --installed</code> / <code class="language-plaintext highlighter-rouge">android init</code>, stop.</li>
+  <li><strong>Gradle smoke build fails:</strong> print failing task + last 50 lines, stop without committing. Leave the partial scaffold for inspection.</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">git init</code> fails:</strong> scaffold is complete; warn and continue.</li>
+  <li><strong>Package name regex fails:</strong> prompt again rather than generating a half-broken project.</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">ln -s</code> fails (Windows or restricted FS):</strong> create <code class="language-plaintext highlighter-rouge">CLAUDE.md</code> as a regular copy of <code class="language-plaintext highlighter-rouge">AGENTS.md</code> instead. Document in the user’s report that they should re-create the symlink (or maintain copies) on platforms that don’t allow user symlinks.</li>
+</ul>

@@ -1,0 +1,143 @@
+
+
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>https://himattm.github.io/skills/</id>
+  <title>Matt's Skills</title>
+  <subtitle>Matt Mckenna's personal skill bundles for Android/Compose development and pull request review workflows.</subtitle>
+  <updated>2026-05-20T15:18:39-07:00</updated>
+  <author>
+    <name>Matt Mckenna</name>
+    <uri>https://himattm.github.io/skills/</uri>
+  </author>
+  <link rel="self" type="application/atom+xml" href="https://himattm.github.io/skills/feed.xml"/>
+  <link rel="alternate" type="text/html" hreflang="en"
+    href="https://himattm.github.io/skills/"/>
+  <generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator>
+  <rights> © 2026 Matt Mckenna </rights>
+  <icon>/skills/assets/img/favicons/favicon.ico</icon>
+  <logo>/skills/assets/img/favicons/favicon-96x96.png</logo>
+
+
+  
+  <entry>
+    <title>address-review</title>
+    <link href="https://himattm.github.io/skills/review/skills/address-review/" rel="alternate" type="text/html" title="address-review" />
+    <published>2026-05-20T00:00:00-07:00</published>
+  
+    <updated>2026-05-20T00:00:00-07:00</updated>
+  
+    <id>https://himattm.github.io/skills/review/skills/address-review/</id>
+    <content type="text/html" src="https://himattm.github.io/skills/review/skills/address-review/" />
+    <author>
+      <name>Matt Mckenna</name>
+    </author>
+
+  
+    
+    <category term="review" />
+    
+  
+
+  <summary>Fetch, validate, triage, and address PR review comments from any reviewer — humans or automated bots. Core principle: skeptical triage, not blind compliance. Reviewers (especially bots) often lack cross-file context and project history — treat their suggestions as hints, not instructions.  Read references/github-api-patterns.md for exact gh api commands, field names, and reply formats.  Workflo...</summary>
+
+  </entry>
+
+  
+  <entry>
+    <title>Android Trace Sections — Perfetto-Backed Code Probes</title>
+    <link href="https://himattm.github.io/skills/android/skills/android-trace-sections/" rel="alternate" type="text/html" title="Android Trace Sections — Perfetto-Backed Code Probes" />
+    <published>2026-04-30T00:00:00-07:00</published>
+  
+    <updated>2026-04-30T00:00:00-07:00</updated>
+  
+    <id>https://himattm.github.io/skills/android/skills/android-trace-sections/</id>
+    <content type="text/html" src="https://himattm.github.io/skills/android/skills/android-trace-sections/" />
+    <author>
+      <name>Matt Mckenna</name>
+    </author>
+
+  
+    
+    <category term="android" />
+    
+  
+
+  <summary>Android Trace Sections — Perfetto-Backed Code Probes  Why trace sections beat logging for performance  Log.d answers “did this run.” Trace sections answer “did this run, on what thread, when, and how long” — with frame boundaries and other concurrent work in the same view. For any performance investigation that’s the difference between guessing and knowing.                 Question       Loggin...</summary>
+
+  </entry>
+
+  
+  <entry>
+    <title>Android StrictMode Probe</title>
+    <link href="https://himattm.github.io/skills/android/skills/android-strictmode-probe/" rel="alternate" type="text/html" title="Android StrictMode Probe" />
+    <published>2026-04-30T00:00:00-07:00</published>
+  
+    <updated>2026-04-30T00:00:00-07:00</updated>
+  
+    <id>https://himattm.github.io/skills/android/skills/android-strictmode-probe/</id>
+    <content type="text/html" src="https://himattm.github.io/skills/android/skills/android-strictmode-probe/" />
+    <author>
+      <name>Matt Mckenna</name>
+    </author>
+
+  
+    
+    <category term="android" />
+    
+  
+
+  <summary>Android StrictMode Probe  Why StrictMode catches what nothing else does  StrictMode is the only built-in tool that fires for the silent killers — operations that don’t throw but ruin perceived performance:     Disk I/O on the main thread   Network calls on the main thread   Leaked SQLite cursors, file streams, registered receivers   Activity / fragment leaks   Untagged sockets   A Log.d probe w...</summary>
+
+  </entry>
+
+  
+  <entry>
+    <title>Android Snapshot Diff — Before / After State Capture</title>
+    <link href="https://himattm.github.io/skills/android/skills/android-snapshot-diff/" rel="alternate" type="text/html" title="Android Snapshot Diff — Before / After State Capture" />
+    <published>2026-04-30T00:00:00-07:00</published>
+  
+    <updated>2026-04-30T00:00:00-07:00</updated>
+  
+    <id>https://himattm.github.io/skills/android/skills/android-snapshot-diff/</id>
+    <content type="text/html" src="https://himattm.github.io/skills/android/skills/android-snapshot-diff/" />
+    <author>
+      <name>Matt Mckenna</name>
+    </author>
+
+  
+    
+    <category term="android" />
+    
+  
+
+  <summary>Android Snapshot Diff — Before / After State Capture  Why diff snapshots  Most “this isn’t working” symptoms boil down to one question: did anything actually change? The agent’s edit might not have hit the right code path. The fix might be a no-op. The dialog might be invisible but still in the hierarchy. The leak might be 2 KB or 200 KB.  A diff between two snapshots gives a categorical answer...</summary>
+
+  </entry>
+
+  
+  <entry>
+    <title>Android Runtime Flag Probe — Framework Debug Without Code Changes</title>
+    <link href="https://himattm.github.io/skills/android/skills/android-runtime-flag-probe/" rel="alternate" type="text/html" title="Android Runtime Flag Probe — Framework Debug Without Code Changes" />
+    <published>2026-04-30T00:00:00-07:00</published>
+  
+    <updated>2026-04-30T00:00:00-07:00</updated>
+  
+    <id>https://himattm.github.io/skills/android/skills/android-runtime-flag-probe/</id>
+    <content type="text/html" src="https://himattm.github.io/skills/android/skills/android-runtime-flag-probe/" />
+    <author>
+      <name>Matt Mckenna</name>
+    </author>
+
+  
+    
+    <category term="android" />
+    
+  
+
+  <summary>Android Runtime Flag Probe — Framework Debug Without Code Changes  When to use     “Is the view bigger than I think?” — debug.layout true overlays bounds   “Is overdraw killing scroll perf?” — debug.hwui.show_layers_updates true   “Are frames missing the budget?” — debug.hwui.profile true   “Is this animation hiding a logic bug?” — window_animation_scale 5 slows everything   “Is Choreographer c...</summary>
+
+  </entry>
+
+</feed>
+
+

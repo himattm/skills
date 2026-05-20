@@ -1,0 +1,261 @@
+<h1 id="android-crash-repro-loop">Android Crash Repro Loop</h1>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>“It crashes sometimes” — intermittent failure with no reliable repro</li>
+  <li>“It fails on slow devices” — a race condition that’s invisible at fast speed</li>
+  <li>“After rotation a few times” — lifecycle race</li>
+  <li>“Happens after a network blip” — flaky connectivity edge case</li>
+  <li>Confirming a “fixed” intermittent bug — 50 clean iterations is meaningful evidence</li>
+  <li>Characterizing a regression before instrumenting — knowing the trigger sequence is required input for <code class="language-plaintext highlighter-rouge">android-probe-logging</code></li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>The bug reproduces 100% of the time — just trigger it once and read logs</li>
+  <li>The bug is purely visual / behavioral with no crash — use <code class="language-plaintext highlighter-rouge">android-snapshot-diff</code></li>
+  <li>You don’t have a hypothesis about the trigger — investigate first with <code class="language-plaintext highlighter-rouge">android-regression-diff-scan</code> or read recent crash reports</li>
+</ul>
+
+<h2 id="pre-flight-detect-what-your-project-supports">Pre-flight: detect what your project supports</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. adb device authorized</span>
+adb devices                              <span class="c"># expect "&lt;id&gt;  device"</span>
+
+<span class="c"># 2. Package and main activity name (the script needs both)</span>
+adb shell pm list packages | <span class="nb">grep</span> <span class="nt">-i</span> &lt;fragment&gt;
+adb shell cmd package resolve-activity <span class="nt">--brief</span> &lt;pkg&gt; | <span class="nb">tail</span> <span class="nt">-1</span>
+
+<span class="c"># 3. The build is installed (and ideally debuggable so you can see logcat</span>
+<span class="c">#    with full tag visibility)</span>
+adb shell dumpsys package &lt;pkg&gt; | <span class="nb">grep</span> <span class="nt">-i</span> <span class="s1">'flags=.*DEBUGGABLE'</span>
+</code></pre></div></div>
+
+<p><strong>Stressors require API-level awareness:</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Stressor command</th>
+      <th>Min API</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">settings put system user_rotation</code></td>
+      <td>17</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">setprop debug.cpu.throttle</code></td>
+      <td>21 <em>(some devices ignore on prod builds)</em></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">am send-trim-memory &lt;pkg&gt; COMPLETE</code></td>
+      <td>21</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">wm density &lt;dpi&gt;</code></td>
+      <td>21</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">svc data disable / enable</code></td>
+      <td>always</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>User-debug vs prod build.</strong> Some <code class="language-plaintext highlighter-rouge">setprop</code> flags are ignored on locked-down production OS images (<code class="language-plaintext highlighter-rouge">ro.build.type=user</code>). Check <code class="language-plaintext highlighter-rouge">adb shell getprop ro.build.type</code> — <code class="language-plaintext highlighter-rouge">userdebug</code> or <code class="language-plaintext highlighter-rouge">eng</code> images honor the full set; <code class="language-plaintext highlighter-rouge">user</code> images may silently no-op <code class="language-plaintext highlighter-rouge">debug.cpu.throttle</code> and others. The <code class="language-plaintext highlighter-rouge">settings put</code> and <code class="language-plaintext highlighter-rouge">wm</code> commands work on every build type.</p>
+
+<p><strong>Skip force-stop if your scenario depends on warm process state.</strong> The default loop force-stops between iterations to test cold-start paths. If your bug only repros warm (e.g. after several swipes during the same process lifetime), drop <code class="language-plaintext highlighter-rouge">am force-stop</code> from the trigger script and let process state persist.</p>
+
+<h2 id="pattern-clear--loop--drive--watch--stop">Pattern: clear → loop → drive → watch → stop</h2>
+
+<h3 id="1-pin-down-the-suspected-trigger">1. Pin down the suspected trigger</h3>
+
+<p>You need a deterministic action sequence. “Open the app and click around” is not a sequence. Specify:</p>
+
+<ul>
+  <li>Starting state (cold start? logged in? on which screen?)</li>
+  <li>Exact taps / inputs / system events</li>
+  <li>Any timing (sleeps, waits)</li>
+</ul>
+
+<p>Use <code class="language-plaintext highlighter-rouge">verify-android-layout</code> first to find element coordinates, then translate to <code class="language-plaintext highlighter-rouge">adb shell input</code>.</p>
+
+<h3 id="2-build-the-trigger-script">2. Build the trigger script</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">#!/usr/bin/env bash</span>
+<span class="c"># /tmp/repro-trigger.sh</span>
+<span class="nb">set</span> <span class="nt">-e</span>
+<span class="nv">PKG</span><span class="o">=</span>com.example.app
+<span class="nv">ACT</span><span class="o">=</span>.MainActivity
+
+adb shell am force-stop <span class="s2">"</span><span class="nv">$PKG</span><span class="s2">"</span>
+adb shell am start <span class="nt">-W</span> <span class="nt">-n</span> <span class="s2">"</span><span class="nv">$PKG</span><span class="s2">/</span><span class="nv">$ACT</span><span class="s2">"</span> <span class="o">&gt;</span>/dev/null
+<span class="nb">sleep </span>2
+adb shell input tap 540 1200          <span class="c"># open detail</span>
+<span class="nb">sleep </span>1
+adb shell input tap 100 100            <span class="c"># back</span>
+<span class="nb">sleep </span>1
+adb shell input keyevent KEYCODE_APP_SWITCH
+<span class="nb">sleep </span>1
+adb shell input keyevent KEYCODE_APP_SWITCH   <span class="c"># back to app</span>
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">-W</code> on <code class="language-plaintext highlighter-rouge">am start</code> waits for launch to settle. The sleeps are critical — too fast and you’re testing your <code class="language-plaintext highlighter-rouge">adb</code> throughput, not the app.</p>
+
+<h3 id="3-wrap-in-the-loop-with-logcat-watch">3. Wrap in the loop with logcat watch</h3>
+
+<p>The canonical shape:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb logcat <span class="nt">-c</span>
+<span class="nv">N</span><span class="o">=</span>50
+<span class="k">for </span>i <span class="k">in</span> <span class="si">$(</span><span class="nb">seq </span>1 <span class="s2">"</span><span class="nv">$N</span><span class="s2">"</span><span class="si">)</span><span class="p">;</span> <span class="k">do
+    </span><span class="nb">echo</span> <span class="s2">"--- iteration </span><span class="nv">$i</span><span class="s2"> ---"</span>
+    bash /tmp/repro-trigger.sh
+    <span class="k">if </span>adb logcat <span class="nt">-d</span> | <span class="nb">grep</span> <span class="nt">-qE</span> <span class="s1">'FATAL EXCEPTION|ANR in|tombstone'</span><span class="p">;</span> <span class="k">then
+        </span><span class="nb">echo</span> <span class="s2">"REPRO ON ITERATION </span><span class="nv">$i</span><span class="s2">"</span>
+        adb logcat <span class="nt">-d</span> <span class="o">&gt;</span> /tmp/repro-crash.log
+        <span class="nb">break
+    </span><span class="k">fi
+done</span>
+</code></pre></div></div>
+
+<p>After the loop, <code class="language-plaintext highlighter-rouge">/tmp/repro-crash.log</code> has the full crash output for the iteration that hit. If the loop completes clean, that’s also signal — see “Stop rule” below.</p>
+
+<h3 id="4-inject-deterministic-stress">4. Inject deterministic stress</h3>
+
+<p>Latent races often need help to surface. Layer one stressor at a time:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Stressor</th>
+      <th>Command</th>
+      <th>Surfaces</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Rotation</strong></td>
+      <td><code class="language-plaintext highlighter-rouge">adb shell settings put system accelerometer_rotation 0 &amp;&amp; adb shell settings put system user_rotation 1</code> (cycle 0/1/2/3 between iterations)</td>
+      <td>Lifecycle / config-change races</td>
+    </tr>
+    <tr>
+      <td><strong>Density change</strong></td>
+      <td><code class="language-plaintext highlighter-rouge">adb shell wm density 320</code> <em>(reset with <code class="language-plaintext highlighter-rouge">adb shell wm density reset</code>)</em></td>
+      <td>Configuration-change recreation paths</td>
+    </tr>
+    <tr>
+      <td><strong>Slow CPU</strong></td>
+      <td><code class="language-plaintext highlighter-rouge">adb shell setprop debug.cpu.throttle 50</code> <em>(reset with <code class="language-plaintext highlighter-rouge">""</code>)</em></td>
+      <td>Timing-dependent bugs</td>
+    </tr>
+    <tr>
+      <td><strong>Network drop</strong></td>
+      <td><code class="language-plaintext highlighter-rouge">adb shell svc data disable; sleep 3; adb shell svc data enable</code></td>
+      <td>Connectivity edge cases</td>
+    </tr>
+    <tr>
+      <td><strong>Low memory</strong></td>
+      <td><code class="language-plaintext highlighter-rouge">adb shell am send-trim-memory &lt;pkg&gt; COMPLETE</code></td>
+      <td>Process-death restoration</td>
+    </tr>
+    <tr>
+      <td><strong>Background/foreground</strong></td>
+      <td><code class="language-plaintext highlighter-rouge">adb shell input keyevent KEYCODE_HOME</code> then re-launch</td>
+      <td>Lifecycle restoration</td>
+    </tr>
+    <tr>
+      <td><strong>Slow animations</strong></td>
+      <td><code class="language-plaintext highlighter-rouge">adb shell settings put global window_animation_scale 5</code> <em>(reset to 1)</em></td>
+      <td>Animation-frame races</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Add the stressor inside the loop body, not outside it. Reset any toggled property at the end of each iteration so iteration N+1 starts clean.</p>
+
+<h3 id="5-delegate-the-crash-log">5. Delegate the crash log</h3>
+
+<p>Crash logs include AndroidRuntime + StackTrace + ProcessRecord — typically 50+ lines. Spawn a Sonnet sub-agent:</p>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/repro-crash.log</code>. Find the FATAL EXCEPTION block (or ANR in block). Return: (a) exception class, (b) message, (c) the first 3 stack frames inside our package (filter out <code class="language-plaintext highlighter-rouge">android.*</code>, <code class="language-plaintext highlighter-rouge">kotlin.*</code>, <code class="language-plaintext highlighter-rouge">java.*</code>), (d) any “Caused by” chain. Under 80 words. <code class="language-plaintext highlighter-rouge">model: "sonnet"</code>.</p>
+</blockquote>
+
+<h3 id="6-stop-rules">6. Stop rules</h3>
+
+<ul>
+  <li><strong>Repro hit</strong> → fix the bug. Re-run the loop after the fix; expect zero hits across 50+ iterations.</li>
+  <li><strong>50 iterations clean</strong> → the bug is not in this trigger path. Either the hypothesis is wrong (re-investigate the symptom), or the bug needs a different stressor.</li>
+  <li><strong>Repro hit on iteration 1</strong> → the bug is <em>not</em> intermittent; you have a deterministic repro. Drop the loop, switch to <code class="language-plaintext highlighter-rouge">android-probe-logging</code>.</li>
+</ul>
+
+<p>For “is it really fixed?” verification, 100 clean iterations under realistic stress is the gold standard — but 50 is usually convincing.</p>
+
+<h3 id="7-cleanup-gate-blocking">7. Cleanup gate (BLOCKING)</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Reset any system properties / settings you toggled</span>
+adb shell setprop debug.cpu.throttle <span class="s2">""</span>
+adb shell settings put global window_animation_scale 1
+adb shell settings put system accelerometer_rotation 1
+adb shell settings put system user_rotation 0
+adb shell wm density reset
+adb shell svc data <span class="nb">enable</span>
+
+<span class="c"># Delete scratch files</span>
+<span class="nb">rm</span> <span class="nt">-f</span> /tmp/repro-trigger.sh /tmp/repro-crash.log
+
+<span class="c"># Kill any background loop processes (if you ran in background)</span>
+<span class="nb">jobs</span> <span class="nt">-p</span> | xargs <span class="nt">-r</span> <span class="nb">kill </span>2&gt;/dev/null
+</code></pre></div></div>
+
+<p>The most common failure: leaving <code class="language-plaintext highlighter-rouge">window_animation_scale 5</code> or <code class="language-plaintext highlighter-rouge">svc data disable</code> on the device, which then confuses every subsequent investigation. Reset everything.</p>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Skipping the cleanup gate</td>
+      <td>Reset toggled props/settings; delete scratch files; orphaned <code class="language-plaintext highlighter-rouge">disable data</code> will haunt the next session</td>
+    </tr>
+    <tr>
+      <td>Sleeps too short between actions</td>
+      <td>You’re testing <code class="language-plaintext highlighter-rouge">adb</code> round-trip, not the app; use 1–2s minimum, more for animations</td>
+    </tr>
+    <tr>
+      <td>No <code class="language-plaintext highlighter-rouge">am force-stop</code> between iterations</td>
+      <td>Stale process state masks process-restoration bugs</td>
+    </tr>
+    <tr>
+      <td>Reading the crash log inline</td>
+      <td>Delegate to Sonnet; crash logs are 50+ lines of mostly framework noise</td>
+    </tr>
+    <tr>
+      <td>Layering all stressors at once</td>
+      <td>One stressor at a time; otherwise you can’t attribute the repro</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">for i in {1..50}; do ... done</code> without <code class="language-plaintext highlighter-rouge">logcat -c</code> first</td>
+      <td>Stale crashes from earlier runs trigger false positives</td>
+    </tr>
+    <tr>
+      <td>Stopping at first iteration’s crash and assuming it’s the same bug</td>
+      <td>Compare with the original symptom — repro loops sometimes surface unrelated crashes</td>
+    </tr>
+    <tr>
+      <td>Loop completes clean, declaring bug “fixed” without the fix</td>
+      <td>Clean repro after a fix is meaningful; clean repro without a fix means your trigger is wrong</td>
+    </tr>
+  </tbody>
+</table>

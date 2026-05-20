@@ -1,0 +1,6 @@
+const swconf = {
+  
+    purge: true
+  
+};
+

@@ -1,0 +1,303 @@
+<p>Automated review-fix-push loop for pull requests. Reads the PR diff, spawns a team of specialist review agents in parallel (security, performance, validation, etc. — chosen dynamically based on the diff), merges their findings, fixes what’s actionable, pushes, and repeats until the reviews come back clean — or hits the safety cap.</p>
+
+<h2 id="workflow">Workflow</h2>
+
+<div class="language-dot highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">digraph</span> <span class="nv">review_cycle</span> <span class="p">{</span>
+    <span class="n">rankdir</span><span class="p">=</span><span class="nv">TB</span><span class="p">;</span>
+    <span class="nv">start</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Get PR number"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">analyze</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Read diff\nselect specialist domains"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">specialists</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Parallel specialist agents\n(opus, one per domain)"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">merge</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Merge &amp; deduplicate\nfindings"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">issues</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Actionable issues?"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">diamond</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">fix</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Spawn fix agents\n(parallel when independent)"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">build</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Build verification"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">commit</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Commit + push"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">box</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">cap</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Iteration &lt; max?"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">diamond</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">done</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Done — PR is clean"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">doublecircle</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">capped</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"Stop — hit safety cap\nreport remaining items"</span> <span class="n">shape</span><span class="p">=</span><span class="nv">doublecircle</span><span class="o">]</span><span class="p">;</span>
+
+    <span class="nv">start</span> <span class="o">-&gt;</span> <span class="nv">analyze</span><span class="p">;</span>
+    <span class="nv">analyze</span> <span class="o">-&gt;</span> <span class="nv">specialists</span><span class="p">;</span>
+    <span class="nv">specialists</span> <span class="o">-&gt;</span> <span class="nv">merge</span><span class="p">;</span>
+    <span class="nv">merge</span> <span class="o">-&gt;</span> <span class="nv">issues</span><span class="p">;</span>
+    <span class="nv">issues</span> <span class="o">-&gt;</span> <span class="nv">done</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"no"</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">issues</span> <span class="o">-&gt;</span> <span class="nv">fix</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"yes"</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">fix</span> <span class="o">-&gt;</span> <span class="nv">build</span><span class="p">;</span>
+    <span class="nv">build</span> <span class="o">-&gt;</span> <span class="nv">commit</span><span class="p">;</span>
+    <span class="nv">commit</span> <span class="o">-&gt;</span> <span class="nv">cap</span><span class="p">;</span>
+    <span class="nv">cap</span> <span class="o">-&gt;</span> <span class="nv">analyze</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"yes"</span><span class="o">]</span><span class="p">;</span>
+    <span class="nv">cap</span> <span class="o">-&gt;</span> <span class="nv">capped</span> <span class="o">[</span><span class="n">label</span><span class="p">=</span><span class="s2">"no"</span><span class="o">]</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="1-get-pr-number">1. Get PR Number</h3>
+
+<p>Use <code class="language-plaintext highlighter-rouge">$ARGUMENTS</code> if provided (e.g., <code class="language-plaintext highlighter-rouge">/review-cycle 203</code>). Otherwise auto-detect:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>gh <span class="nb">pr </span>view <span class="nt">--json</span> number <span class="nt">--jq</span> <span class="s1">'.number'</span>
+</code></pre></div></div>
+
+<p>Fail clearly if no PR is found.</p>
+
+<h3 id="2-diff-analysis--agent-selection">2. Diff Analysis &amp; Agent Selection</h3>
+
+<p>Read the PR metadata and diff:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>gh <span class="nb">pr </span>view &lt;number&gt;
+gh <span class="nb">pr </span>diff &lt;number&gt;
+</code></pre></div></div>
+
+<p>Analyze what’s changing — which files, what domains are touched (API routes, database queries, UI components, auth logic, config changes, etc.) — and decide which specialist agents to spawn.</p>
+
+<p><strong>Selecting specialist domains:</strong></p>
+<ul>
+  <li>Pick domains where deep focused attention adds value for this specific diff (e.g., “security”, “performance”, “input validation”, “error handling”, “accessibility”, “correctness”, “data integrity”)</li>
+  <li>Each specialist should cover something the others won’t — avoid overlapping mandates</li>
+  <li>Scale the number of agents to the PR’s complexity — typically 2-4 specialists for most PRs, rarely more than 5. A one-file typo fix needs fewer specialists than a PR touching auth middleware across 20 files</li>
+  <li>There is no fixed menu — use your judgment based on what the diff actually contains</li>
+</ul>
+
+<p><strong>Write a focused prompt for each specialist</strong> that includes:</p>
+<ul>
+  <li>The specific domain/lens to review through</li>
+  <li>Concrete examples of what to look for in that domain</li>
+  <li>The PR number so the agent can fetch the diff itself</li>
+  <li>Instructions to categorize findings as “actionable” (fix before merge) vs “informational” (awareness only)</li>
+  <li>For round 2+, a summary of what was fixed in prior rounds so the agent doesn’t re-flag resolved items</li>
+</ul>
+
+<h3 id="3-parallel-specialist-reviews">3. Parallel Specialist Reviews</h3>
+
+<p>Spawn all specialist agents in parallel. Each specialist fetches the diff independently rather than receiving it in its prompt — this avoids prompt size limits on large PRs. Each agent is an <strong>opus</strong> agent that:</p>
+
+<ol>
+  <li>Fetches the PR diff via <code class="language-plaintext highlighter-rouge">gh pr diff &lt;number&gt;</code></li>
+  <li>Reviews the entire diff exclusively through its assigned lens</li>
+  <li>Returns findings in this format:</li>
+</ol>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>## [Domain] Review
+
+### Actionable
+- **[file:line]** — Description of the issue and why it matters
+
+### Informational
+- **[file:line]** — Observation (no fix needed)
+</code></pre></div></div>
+
+<p><strong>Include these constraints in each specialist’s prompt:</strong></p>
+<ul>
+  <li>Stay in your lane — a security agent should not flag naming conventions, a performance agent should not suggest style changes</li>
+  <li>Be specific — cite file paths, line numbers, and what’s wrong</li>
+  <li>Actionable means “fix before merge”; informational means “be aware”</li>
+  <li>Don’t suggest refactors or style changes unless genuinely in-domain (e.g., a performance agent flagging an O(n²) loop is in-domain; suggesting a variable rename is not)</li>
+</ul>
+
+<h3 id="4-merge-deduplicate--triage">4. Merge, Deduplicate &amp; Triage</h3>
+
+<p>After all specialist agents return:</p>
+
+<ol>
+  <li><strong>Merge</strong> all findings into a single list</li>
+  <li><strong>Deduplicate</strong> — if two agents flag the same location for related reasons (e.g., security agent flags unsanitized input, validation agent flags missing input check on the same line), combine into one finding that preserves rationales from both agents, keeping the most severe categorization</li>
+  <li><strong>Triage</strong> the merged list:</li>
+</ol>
+
+<ul>
+  <li><strong>Fix</strong> — genuine issues worth addressing</li>
+  <li><strong>Skip</strong> — style preferences, informational notes, or things that aren’t worth the churn</li>
+</ul>
+
+<p>If nothing is actionable, <strong>stop</strong>. The PR is clean.</p>
+
+<h3 id="5-implement-fixes">5. Implement Fixes</h3>
+
+<p>Group fixes by independence:</p>
+
+<ul>
+  <li><strong>Independent changes</strong> (different files, no shared state): spawn parallel agents</li>
+  <li><strong>Dependent changes</strong> (shared types, cascading edits): single agent or sequential agents</li>
+</ul>
+
+<p>Each implementation agent prompt must include:</p>
+<ul>
+  <li>Exact file paths and line numbers</li>
+  <li>What to change and why</li>
+  <li>The build command to use for verification (see step 6 for detection)</li>
+  <li>Instruction to actually execute (not just plan)</li>
+</ul>
+
+<p><strong>Shell quoting</strong>: Paths with parentheses (e.g., <code class="language-plaintext highlighter-rouge">(auth)</code>, <code class="language-plaintext highlighter-rouge">(dashboard)</code>) must be double-quoted in git and bash commands:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Wrong — glob expansion breaks this</span>
+git diff apps/web/src/app/<span class="o">(</span>auth<span class="o">)</span>/callback/route.ts
+
+<span class="c"># Right</span>
+git diff <span class="nt">--</span> <span class="s2">"apps/web/src/app/(auth)/callback/route.ts"</span>
+</code></pre></div></div>
+
+<h3 id="6-build-verification">6. Build Verification</h3>
+
+<p>After all fix agents complete, verify the build passes. Detect the project’s build system and run the appropriate command:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Indicator</th>
+      <th>Build command</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">Makefile</code></td>
+      <td><code class="language-plaintext highlighter-rouge">make build</code> (or <code class="language-plaintext highlighter-rouge">make</code> if no build target)</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">Cargo.toml</code></td>
+      <td><code class="language-plaintext highlighter-rouge">cargo build</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">go.mod</code></td>
+      <td><code class="language-plaintext highlighter-rouge">go build ./...</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">build.gradle</code> / <code class="language-plaintext highlighter-rouge">build.gradle.kts</code></td>
+      <td><code class="language-plaintext highlighter-rouge">./gradlew build</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">pom.xml</code></td>
+      <td><code class="language-plaintext highlighter-rouge">mvn compile</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">package.json</code> with <code class="language-plaintext highlighter-rouge">build</code> script</td>
+      <td>Use the repo’s package manager (<code class="language-plaintext highlighter-rouge">npm run build</code>, <code class="language-plaintext highlighter-rouge">pnpm build</code>, <code class="language-plaintext highlighter-rouge">yarn build</code>, <code class="language-plaintext highlighter-rouge">bun run build</code>)</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">turbo.json</code></td>
+      <td>Prefer <code class="language-plaintext highlighter-rouge">turbo build</code> scoped to affected packages</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">CMakeLists.txt</code></td>
+      <td><code class="language-plaintext highlighter-rouge">cmake --build build</code></td>
+    </tr>
+    <tr>
+      <td>None of the above</td>
+      <td>Check CLAUDE.md or project docs for build instructions; if nothing found, skip build verification and warn the user</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>If multiple build systems are present, prefer the one closest to the changed files. When in doubt, check the repo’s CLAUDE.md or contributing docs for the canonical build command.</p>
+
+<p>If the build fails, fix the errors before proceeding. Do not push broken code.</p>
+
+<h3 id="7-commit-and-push">7. Commit and Push</h3>
+
+<p>Stage only the files that were changed. Write a concise commit message summarizing the fixes. Push to the PR branch.</p>
+
+<h3 id="8-loop-or-stop">8. Loop or Stop</h3>
+
+<ul>
+  <li>If iteration count &lt; <strong>5</strong> (safety cap), go back to step 2 with a fresh analysis. Fixes in one area can introduce issues in another, so the specialist mix may change between rounds.</li>
+  <li>If at the cap, stop and report any remaining items to the user.</li>
+</ul>
+
+<p>The loop should converge quickly — most PRs are clean after 2-3 rounds.</p>
+
+<h2 id="key-design-decisions">Key Design Decisions</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Decision</th>
+      <th>Rationale</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Dynamic specialist selection</td>
+      <td>No fixed menu — the LLM picks review domains based on what the diff actually contains. A config PR gets different specialists than an auth middleware PR.</td>
+    </tr>
+    <tr>
+      <td>Opus for specialist agents</td>
+      <td>Reviews require judgment about what matters — Opus catches subtler issues like missing disabled props, misleading pricing text, timing side-channels</td>
+    </tr>
+    <tr>
+      <td>Parallel specialist execution</td>
+      <td>All specialists run concurrently — each gets the full diff but reviews through a single focused lens. Faster than sequential.</td>
+    </tr>
+    <tr>
+      <td>Merged findings, single triage</td>
+      <td>All specialist output is combined and deduplicated before triaging once. Avoids duplicate fixes when two agents flag the same code.</td>
+    </tr>
+    <tr>
+      <td>Full re-selection each round</td>
+      <td>Every iteration re-analyzes the full current diff and re-picks specialists. Fixes in one domain may introduce issues in another.</td>
+    </tr>
+    <tr>
+      <td>Fresh holistic view each round</td>
+      <td>Each round re-reads the complete PR diff (including all prior changes), preventing anchoring on prior findings</td>
+    </tr>
+    <tr>
+      <td>Parallel fix agents</td>
+      <td>Independent changes don’t need to wait for each other</td>
+    </tr>
+    <tr>
+      <td>Build gate before push</td>
+      <td>Never push code that doesn’t compile</td>
+    </tr>
+    <tr>
+      <td>Max 5 iterations</td>
+      <td>Prevents infinite loops if review keeps finding new things from its own fixes</td>
+    </tr>
+    <tr>
+      <td>Triage step</td>
+      <td>Not every review finding is worth fixing — human judgment applies</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="common-mistakes">Common Mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Unquoted paths with parens in shell</td>
+      <td>Always double-quote paths containing <code class="language-plaintext highlighter-rouge">(</code> or <code class="language-plaintext highlighter-rouge">)</code> in git/bash commands</td>
+    </tr>
+    <tr>
+      <td>Pushing without build verification</td>
+      <td>Always run the build after fixes, before pushing</td>
+    </tr>
+    <tr>
+      <td>Re-reviewing without pushing first</td>
+      <td>The specialist agents read <code class="language-plaintext highlighter-rouge">gh pr diff</code> — changes must be pushed to be visible to the next round’s agents</td>
+    </tr>
+    <tr>
+      <td>Passing prior review context to new agent</td>
+      <td>Fresh agent = fresh context. Only pass “what was fixed” summary, not the old findings</td>
+    </tr>
+    <tr>
+      <td>Fixing informational/style items</td>
+      <td>Only fix actionable issues — style preferences create unnecessary churn</td>
+    </tr>
+    <tr>
+      <td>Overlapping specialist mandates</td>
+      <td>Each specialist should have a distinct domain — if two agents both flag style issues, the mandates overlap. One agent per concern.</td>
+    </tr>
+    <tr>
+      <td>Too many specialists for a simple PR</td>
+      <td>Scale agent count to PR complexity. A one-file typo fix doesn’t need 5 specialists.</td>
+    </tr>
+    <tr>
+      <td>Specialists drifting out of lane</td>
+      <td>A security agent shouldn’t flag naming conventions. Prompt each specialist to stay in its domain.</td>
+    </tr>
+  </tbody>
+</table>

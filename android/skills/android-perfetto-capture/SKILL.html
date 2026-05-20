@@ -1,0 +1,377 @@
+<h1 id="android-perfetto-capture--get-a-trace-from-the-device">Android Perfetto Capture — Get a Trace From the Device</h1>
+
+<h2 id="what-this-skill-does-and-doesnt-do">What this skill does (and doesn’t do)</h2>
+
+<p>This skill is the <strong>capture half</strong> of the perfetto loop. It produces a <code class="language-plaintext highlighter-rouge">.perfetto-trace</code> file. It does <strong>not</strong> parse the trace — that’s <code class="language-plaintext highlighter-rouge">android-perfetto-analyze</code>.</p>
+
+<p>A trace file is binary, typically 5–50 MB, captured over a fixed time window. It contains every CPU scheduling event, every framework atrace slice (gfx/view/wm/am/…), every <code class="language-plaintext highlighter-rouge">Trace.beginSection</code> slice your app emits, and every Java/Kotlin <code class="language-plaintext highlighter-rouge">track_event</code> your app emits via <code class="language-plaintext highlighter-rouge">androidx.tracing</code>. It is the single most informative debugging artifact Android exposes.</p>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>Any time <code class="language-plaintext highlighter-rouge">android-trace-sections</code> instrumented your app and now needs a trace</li>
+  <li>“Is this animation dropping frames?” — capture during the animation, analyze with frame-timeline queries</li>
+  <li>“Cold start is slow” — capture from before launch through first frame drawn</li>
+  <li>“Scroll janks at row N” — capture during scroll, compare frame durations across the timeline</li>
+  <li>“Is this work landing on <code class="language-plaintext highlighter-rouge">main</code>?” — capture, query slice→thread mapping</li>
+  <li>Comparing before/after a perf fix — capture A, fix, capture B, run the same analysis</li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>“Did this code run?” — <code class="language-plaintext highlighter-rouge">android-probe-logging</code> is faster and cheaper</li>
+  <li>“What state is the UI in right now?” — <code class="language-plaintext highlighter-rouge">verify-android-layout</code> / <code class="language-plaintext highlighter-rouge">android-snapshot-diff</code></li>
+  <li>“What violations does StrictMode see?” — <code class="language-plaintext highlighter-rouge">android-strictmode-probe</code></li>
+  <li>A single tap is enough to repro and you only need a stack trace — read logcat</li>
+</ul>
+
+<h2 id="pre-flight-pick-a-capture-strategy">Pre-flight: pick a capture strategy</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Strategy</th>
+      <th>When</th>
+      <th>Recording lifecycle</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>One-shot host script</strong> (<code class="language-plaintext highlighter-rouge">record_android_trace</code>)</td>
+      <td>Default; best for scripted captures driven by <code class="language-plaintext highlighter-rouge">adb input</code></td>
+      <td>Starts → captures for <code class="language-plaintext highlighter-rouge">-t</code> seconds → stops → pulls file</td>
+    </tr>
+    <tr>
+      <td><strong>On-device long-running</strong> (<code class="language-plaintext highlighter-rouge">adb shell perfetto</code>)</td>
+      <td>Captures longer than 30s; flexible config; persistent past adb disconnect</td>
+      <td>Starts on device → you drive flow → you stop with <code class="language-plaintext highlighter-rouge">kill -TERM &lt;pid&gt;</code> or wait for <code class="language-plaintext highlighter-rouge">-t</code> to elapse → pull from <code class="language-plaintext highlighter-rouge">/data/misc/perfetto-traces/</code></td>
+    </tr>
+    <tr>
+      <td><strong>In-app <code class="language-plaintext highlighter-rouge">Tracing</code> API</strong></td>
+      <td>You want to start/stop a trace from inside the app on a specific signal</td>
+      <td>App writes to a public location → you <code class="language-plaintext highlighter-rouge">adb pull</code> afterwards</td>
+    </tr>
+    <tr>
+      <td><strong>Macrobenchmark</strong></td>
+      <td>You’re measuring with a Macrobenchmark test class already</td>
+      <td>The test framework manages capture</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>For agent-driven investigations, <strong>default to the one-shot host script</strong>. The on-device form is for captures longer than ~30s where the host script’s adb-tunnel can be flaky.</p>
+
+<h2 id="pre-flight-detect-what-your-project-supports">Pre-flight: detect what your project supports</h2>
+
+<p>Before instrumentation, confirm:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. Device is connected and authorized</span>
+adb devices                      <span class="c"># expect "&lt;id&gt;  device" (not "unauthorized" or "offline")</span>
+
+<span class="c"># 2. Device API level — perfetto is built in on API 28+; older devices need atrace fallback</span>
+adb shell getprop ro.build.version.sdk
+
+<span class="c"># 3. Package is installed and the app is built debuggable (perfetto only sees app slices for debuggable apps unless the system is rooted)</span>
+adb shell pm list packages | <span class="nb">grep</span> <span class="nt">-i</span> &lt;your-package-fragment&gt;
+adb shell dumpsys package &lt;your-package&gt; | <span class="nb">grep</span> <span class="nt">-i</span> <span class="s1">'flags=.*DEBUGGABLE'</span>
+</code></pre></div></div>
+
+<p>Also check whether your <code class="language-plaintext highlighter-rouge">app/build.gradle</code> declares <code class="language-plaintext highlighter-rouge">androidx.tracing:tracing</code> (or <code class="language-plaintext highlighter-rouge">tracing-ktx</code>). If not, the framework atrace categories (<code class="language-plaintext highlighter-rouge">gfx</code>, <code class="language-plaintext highlighter-rouge">view</code>, <code class="language-plaintext highlighter-rouge">wm</code>, <code class="language-plaintext highlighter-rouge">am</code>, <code class="language-plaintext highlighter-rouge">binder_driver</code>, …) still capture — but your custom <code class="language-plaintext highlighter-rouge">Trace.beginSection</code> calls won’t show up unless the platform fallback <code class="language-plaintext highlighter-rouge">android.os.Trace</code> is used.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">grep</span> <span class="nt">-r</span> <span class="s1">'androidx.tracing'</span> app/build.gradle<span class="k">*</span> gradle/libs.versions.toml 2&gt;/dev/null
+</code></pre></div></div>
+
+<h2 id="strategy-a-one-shot-host-script-default">Strategy A: one-shot host script (default)</h2>
+
+<h3 id="1-get-the-recorder">1. Get the recorder</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>curl <span class="nt">-L</span> https://raw.githubusercontent.com/google/perfetto/main/tools/record_android_trace <span class="nt">-o</span> /tmp/record_android_trace
+<span class="nb">chmod</span> +x /tmp/record_android_trace
+</code></pre></div></div>
+
+<p>The script is a thin wrapper around <code class="language-plaintext highlighter-rouge">adb shell perfetto</code> plus pull. Cache it in <code class="language-plaintext highlighter-rouge">/tmp</code> for the session — no install required.</p>
+
+<h3 id="2-capture">2. Capture</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>/tmp/record_android_trace <span class="se">\</span>
+    <span class="nt">-o</span> /tmp/trace.perfetto-trace <span class="se">\</span>
+    <span class="nt">-t</span> 10s <span class="se">\</span>
+    <span class="nt">-b</span> 32mb <span class="se">\</span>
+    <span class="nt">-a</span> com.example.app <span class="se">\</span>
+    sched freq idle am wm gfx view binder_driver hal dalvik input res memory power
+</code></pre></div></div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Why</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">-o &lt;path&gt;</code></td>
+      <td>Output <code class="language-plaintext highlighter-rouge">.perfetto-trace</code> file path on host</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">-t 10s</code></td>
+      <td>Recording duration; long enough to cover your scenario plus ~2s padding</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">-b 32mb</code></td>
+      <td>Per-buffer size; raise to 64–128 MB for 30s+ captures or busy apps</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">-a &lt;pkg&gt;</code></td>
+      <td>Restrict atrace events to your app — keeps the trace small</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">sched freq idle ...</code></td>
+      <td>Atrace categories — see below</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The atrace categories you want by default:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">sched</code> — every thread scheduling event (which thread ran when, on which core)</li>
+  <li><code class="language-plaintext highlighter-rouge">freq</code> — CPU frequency over time (helps spot governor throttling)</li>
+  <li><code class="language-plaintext highlighter-rouge">idle</code> — CPU idle states</li>
+  <li><code class="language-plaintext highlighter-rouge">am</code> — <code class="language-plaintext highlighter-rouge">ActivityManager</code> (lifecycle transitions)</li>
+  <li><code class="language-plaintext highlighter-rouge">wm</code> — <code class="language-plaintext highlighter-rouge">WindowManager</code></li>
+  <li><code class="language-plaintext highlighter-rouge">gfx</code> — graphics (frame draw, surface flinger, vsync)</li>
+  <li><code class="language-plaintext highlighter-rouge">view</code> — view-system calls (measure, layout, draw, RecyclerView, Compose)</li>
+  <li><code class="language-plaintext highlighter-rouge">binder_driver</code> — IPC calls</li>
+  <li><code class="language-plaintext highlighter-rouge">hal</code> — hardware abstraction layer</li>
+  <li><code class="language-plaintext highlighter-rouge">dalvik</code> — JIT compile, GC pause, classloading</li>
+  <li><code class="language-plaintext highlighter-rouge">input</code> — touch dispatch</li>
+  <li><code class="language-plaintext highlighter-rouge">res</code> — resource loading</li>
+  <li><code class="language-plaintext highlighter-rouge">memory</code> — Java heap stats</li>
+  <li><code class="language-plaintext highlighter-rouge">power</code> — wake locks, doze</li>
+</ul>
+
+<p>Add <code class="language-plaintext highlighter-rouge">database</code> if you suspect SQLite, <code class="language-plaintext highlighter-rouge">audio</code> for AudioFlinger work.</p>
+
+<h3 id="3-drive-the-flow-inside-the-recording-window">3. Drive the flow inside the recording window</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Start capture in background</span>
+/tmp/record_android_trace <span class="nt">-o</span> /tmp/trace.perfetto-trace <span class="nt">-t</span> 10s <span class="nt">-b</span> 32mb <span class="se">\</span>
+    <span class="nt">-a</span> com.example.app sched freq idle am wm gfx view binder_driver hal dalvik &amp;
+
+<span class="nv">CAPTURE_PID</span><span class="o">=</span><span class="nv">$!</span>
+<span class="nb">sleep </span>2                                 <span class="c"># let perfetto warm up</span>
+adb shell input tap 540 1200            <span class="c"># the suspect tap / scenario</span>
+<span class="nb">sleep </span>1
+adb shell input swipe 540 1500 540 500  <span class="c"># scroll</span>
+<span class="nb">sleep </span>4                                 <span class="c"># leave room before -t expires</span>
+
+<span class="nb">wait</span> <span class="nv">$CAPTURE_PID</span>                       <span class="c"># let the recording stop and pull complete</span>
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">sleep 2</code> warm-up is non-negotiable: starting <code class="language-plaintext highlighter-rouge">record_android_trace</code> opens an adb shell, configures perfetto, and starts the trace daemon. If you trigger your scenario before perfetto is recording, you’ll get an empty trace.</p>
+
+<h3 id="4-verify-the-trace-before-declaring-capture-done">4. Verify the trace before declaring capture done</h3>
+
+<p>A trace file can exist but be empty (perfetto failed silently, the buffer was too small, the app was force-stopped before it could emit). Always verify:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. File exists and is non-trivially sized</span>
+<span class="nb">ls</span> <span class="nt">-la</span> /tmp/trace.perfetto-trace
+<span class="c"># Expect at least 100 KB; under that means almost certainly empty</span>
+
+<span class="c"># 2. Quick slice count via trace_processor (see android-perfetto-analyze for setup)</span>
+/tmp/trace_processor /tmp/trace.perfetto-trace <span class="nt">-q</span> - <span class="o">&lt;&lt;</span><span class="sh">'</span><span class="no">SQL</span><span class="sh">'
+SELECT COUNT(*) AS slice_count FROM slice;
+SELECT COUNT(*) AS sched_count FROM sched;
+SELECT COUNT(DISTINCT name) AS distinct_slice_names FROM slice;
+</span><span class="no">SQL
+</span></code></pre></div></div>
+
+<p>A healthy 10-second capture of a moderately busy app should report:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">slice_count</code>: 10,000+</li>
+  <li><code class="language-plaintext highlighter-rouge">sched_count</code>: 100,000+</li>
+  <li><code class="language-plaintext highlighter-rouge">distinct_slice_names</code>: 200+</li>
+</ul>
+
+<p>If any of these are zero or near-zero, <strong>your capture is broken</strong> — fix the capture before analyzing. Common causes are listed under “Common mistakes.”</p>
+
+<h2 id="strategy-b-on-device-long-running">Strategy B: on-device long-running</h2>
+
+<p>Use when you need &gt;30s captures or when the host-script’s adb tunnel keeps dropping.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. Build a config file</span>
+<span class="nb">cat</span> <span class="o">&gt;</span> /tmp/perfetto.cfg <span class="o">&lt;&lt;</span><span class="sh">'</span><span class="no">EOF</span><span class="sh">'
+buffers { size_kb: 65536 }
+buffers { size_kb: 8192 }
+
+data_sources {
+  config {
+    name: "linux.process_stats"
+    target_buffer: 1
+    process_stats_config { scan_all_processes_on_start: true }
+  }
+}
+
+data_sources {
+  config {
+    name: "linux.ftrace"
+    ftrace_config {
+      ftrace_events: "sched/sched_switch"
+      ftrace_events: "sched/sched_wakeup"
+      ftrace_events: "sched/sched_wakeup_new"
+      ftrace_events: "sched/sched_waking"
+      ftrace_events: "power/cpu_frequency"
+      ftrace_events: "power/cpu_idle"
+      atrace_categories: "gfx"
+      atrace_categories: "view"
+      atrace_categories: "wm"
+      atrace_categories: "am"
+      atrace_categories: "binder_driver"
+      atrace_categories: "dalvik"
+      atrace_apps: "com.example.app"
+    }
+  }
+}
+
+data_sources {
+  config {
+    name: "android.surfaceflinger.frametimeline"
+  }
+}
+
+duration_ms: 60000
+</span><span class="no">EOF
+
+</span><span class="c"># 2. Push and start</span>
+adb push /tmp/perfetto.cfg /data/local/tmp/perfetto.cfg
+adb shell <span class="s1">'cat /data/local/tmp/perfetto.cfg | perfetto --txt -c - -o /data/misc/perfetto-traces/trace.pftrace'</span> &amp;
+<span class="nv">PERFETTO_PID</span><span class="o">=</span><span class="nv">$!</span>
+
+<span class="c"># 3. Drive your flow in the host shell</span>
+<span class="nb">sleep </span>3
+adb shell input tap 540 1200
+<span class="c"># ... etc</span>
+
+<span class="c"># 4. Wait for the capture to finish, pull, clean up</span>
+<span class="nb">wait</span> <span class="nv">$PERFETTO_PID</span>
+adb pull /data/misc/perfetto-traces/trace.pftrace /tmp/trace.perfetto-trace
+adb shell <span class="nb">rm</span> /data/misc/perfetto-traces/trace.pftrace
+adb shell <span class="nb">rm</span> /data/local/tmp/perfetto.cfg
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">frametimeline</code> data source is what makes Studio Profiler’s “Janky frames” view work — include it whenever frame analysis is the goal.</p>
+
+<h2 id="strategy-c-in-app-startstop-advanced">Strategy C: in-app start/stop (advanced)</h2>
+
+<p>When the suspect scenario is hard to time externally — e.g. a background sync that fires unpredictably — start/stop tracing from inside the app:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Add the dependency (debugImplementation only)</span>
+<span class="c1">// debugImplementation("androidx.tracing:tracing-perfetto:1.0.0")</span>
+<span class="c1">// debugImplementation("androidx.tracing:tracing-perfetto-binary:1.0.0")</span>
+
+<span class="k">import</span> <span class="nn">androidx.tracing.perfetto.PerfettoSdkTrace</span>
+<span class="k">import</span> <span class="nn">androidx.tracing.perfetto.handshake.PerfettoSdkHandshake</span>
+
+<span class="c1">// AGENT_PERFETTO_&lt;id&gt;: temporary, remove before commit</span>
+<span class="kd">class</span> <span class="nc">DebugPerfettoStarter</span><span class="p">(</span><span class="k">private</span> <span class="kd">val</span> <span class="py">ctx</span><span class="p">:</span> <span class="nc">Context</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">fun</span> <span class="nf">startTrace</span><span class="p">()</span> <span class="p">{</span>
+        <span class="c1">// Trigger captured trace via Perfetto SDK; ships with androidx.tracing-perfetto</span>
+        <span class="nc">PerfettoSdkTrace</span><span class="p">.</span><span class="nf">start</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="k">fun</span> <span class="nf">stopTrace</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nc">PerfettoSdkTrace</span><span class="p">.</span><span class="nf">stop</span><span class="p">()</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>This path is the most fiddly — only use it when wall-clock-driven captures aren’t viable.</p>
+
+<h2 id="repetition-for-noisy-phenomena">Repetition for noisy phenomena</h2>
+
+<p>A single capture is one sample. For “is this consistently slow?” or “is the regression real or noise?” capture N times and feed all N to the analysis:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">for </span>i <span class="k">in</span> <span class="si">$(</span><span class="nb">seq </span>1 5<span class="si">)</span><span class="p">;</span> <span class="k">do</span>
+    /tmp/record_android_trace <span class="nt">-o</span> /tmp/trace-<span class="nv">$i</span>.perfetto-trace <span class="nt">-t</span> 5s <span class="nt">-b</span> 16mb <span class="se">\</span>
+        <span class="nt">-a</span> com.example.app sched freq am wm gfx view dalvik &amp;
+    <span class="nv">PID</span><span class="o">=</span><span class="nv">$!</span>
+    <span class="nb">sleep </span>1
+    adb shell am force-stop com.example.app
+    adb shell am start <span class="nt">-W</span> <span class="nt">-n</span> com.example.app/.MainActivity <span class="o">&gt;</span>/dev/null
+    <span class="nb">wait</span> <span class="nv">$PID</span>
+<span class="k">done</span>
+</code></pre></div></div>
+
+<p>Then run the same <code class="language-plaintext highlighter-rouge">trace_processor</code> query against each trace and compare distributions (median, p95) — see <code class="language-plaintext highlighter-rouge">android-perfetto-analyze</code> for the aggregation pattern.</p>
+
+<h2 id="cleanup-gate">Cleanup gate</h2>
+
+<p>Captures live in <code class="language-plaintext highlighter-rouge">/tmp</code> and (for Strategy B) on the device:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Host</span>
+<span class="nb">rm</span> <span class="nt">-f</span> /tmp/trace<span class="k">*</span>.perfetto-trace /tmp/perfetto.cfg /tmp/trace_processor
+
+<span class="c"># Device — only relevant for Strategy B</span>
+adb shell <span class="nb">ls</span> /data/misc/perfetto-traces/    <span class="c"># any leftover files from a crashed capture</span>
+adb shell <span class="nb">rm</span> /data/misc/perfetto-traces/trace.pftrace 2&gt;/dev/null
+
+<span class="c"># If you used Strategy C, run the trace-sections cleanup grep too:</span>
+rg <span class="s1">'AGENT_PERFETTO_'</span>                         <span class="c"># expect empty</span>
+</code></pre></div></div>
+
+<p>Trace files are large — leaving them in <code class="language-plaintext highlighter-rouge">/tmp</code> can chew through tens of GB across a long session. Always clean up.</p>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>No warm-up sleep before driving the scenario</td>
+      <td>Always <code class="language-plaintext highlighter-rouge">sleep 2</code> after starting the recorder before the first <code class="language-plaintext highlighter-rouge">adb input</code></td>
+    </tr>
+    <tr>
+      <td>Buffer too small for capture duration</td>
+      <td>Use <code class="language-plaintext highlighter-rouge">-b 32mb</code> for 10s, <code class="language-plaintext highlighter-rouge">-b 64mb</code> for 30s, <code class="language-plaintext highlighter-rouge">-b 128mb</code> for 60s+</td>
+    </tr>
+    <tr>
+      <td>Forgot <code class="language-plaintext highlighter-rouge">-a &lt;pkg&gt;</code> filter</td>
+      <td>Trace balloons with system noise; always filter to your app for app-perf investigations</td>
+    </tr>
+    <tr>
+      <td>Trace file is 0 bytes</td>
+      <td>Almost always means perfetto crashed at startup — check <code class="language-plaintext highlighter-rouge">adb logcat | grep perfetto</code> for the cause</td>
+    </tr>
+    <tr>
+      <td>Missing <code class="language-plaintext highlighter-rouge">frametimeline</code> data source for jank investigation</td>
+      <td>Frame analysis needs it; the host script doesn’t add it by default — use Strategy B or specify <code class="language-plaintext highlighter-rouge">surfaceflinger_frame_timeline</code></td>
+    </tr>
+    <tr>
+      <td>Captured but <code class="language-plaintext highlighter-rouge">slice_count = 0</code> in verify step</td>
+      <td><code class="language-plaintext highlighter-rouge">androidx.tracing</code> not in classpath, or app crashed before emitting; check the app’s logcat</td>
+    </tr>
+    <tr>
+      <td>Captured a release build</td>
+      <td>Release builds may strip <code class="language-plaintext highlighter-rouge">Trace.beginSection</code> calls; capture against <code class="language-plaintext highlighter-rouge">debug</code></td>
+    </tr>
+    <tr>
+      <td>Driving the scenario after <code class="language-plaintext highlighter-rouge">-t</code> expired</td>
+      <td>The capture stops at <code class="language-plaintext highlighter-rouge">-t</code>; your scenario must complete <em>inside</em> the window</td>
+    </tr>
+    <tr>
+      <td>Not verifying the capture before analyzing</td>
+      <td>Ten minutes of analysis on an empty trace is the worst kind of debug session</td>
+    </tr>
+    <tr>
+      <td>Leaving <code class="language-plaintext highlighter-rouge">.perfetto-trace</code> files in <code class="language-plaintext highlighter-rouge">/tmp</code></td>
+      <td>They’re large; clean up between investigations</td>
+    </tr>
+  </tbody>
+</table>

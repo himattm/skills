@@ -1,0 +1,240 @@
+<h1 id="android-snapshot-diff--before--after-state-capture">Android Snapshot Diff — Before / After State Capture</h1>
+
+<h2 id="why-diff-snapshots">Why diff snapshots</h2>
+
+<p>Most “this isn’t working” symptoms boil down to one question: <strong>did anything actually change?</strong> The agent’s edit might not have hit the right code path. The fix might be a no-op. The dialog might be invisible but still in the hierarchy. The leak might be 2 KB or 200 KB.</p>
+
+<p>A diff between two snapshots gives a categorical answer where staring at the screen does not.</p>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>“Did the dialog dismiss?” — layout-A vs layout-B</li>
+  <li>“Is this leaking?” — meminfo-A vs meminfo-B after navigating away/back N times; same delta each cycle = leak</li>
+  <li>“Did the fix change anything?” — full snapshot diff; if both snapshots are identical, the fix is a no-op</li>
+  <li>“Did rotation preserve state?” — snapshot before rotation, rotate, snapshot after, compare relevant fields</li>
+  <li>“Did this property actually flip?” — <code class="language-plaintext highlighter-rouge">getprop</code> before/after a <code class="language-plaintext highlighter-rouge">setprop</code></li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>You already know what you expect to see — use <code class="language-plaintext highlighter-rouge">verify-android-layout</code> directly with explicit criteria</li>
+  <li>The bug is purely visual fidelity (color, font, image) — use <code class="language-plaintext highlighter-rouge">verify-android-screen</code></li>
+  <li>The bug is a crash — use <code class="language-plaintext highlighter-rouge">android-probe-logging</code> and <code class="language-plaintext highlighter-rouge">adb logcat</code></li>
+</ul>
+
+<h2 id="pre-flight-detect-what-your-project-supports">Pre-flight: detect what your project supports</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. adb device authorized</span>
+adb devices                              <span class="c"># expect "&lt;id&gt;  device"</span>
+
+<span class="c"># 2. The `android` CLI is installed (used by the layout / screen channels)</span>
+which android <span class="o">&amp;&amp;</span> android <span class="nt">--version</span>
+
+<span class="c"># 3. Package name (needed for dumpsys meminfo, am send-trim-memory)</span>
+adb shell pm list packages | <span class="nb">grep</span> <span class="nt">-i</span> &lt;fragment&gt;
+</code></pre></div></div>
+
+<p><strong>No <code class="language-plaintext highlighter-rouge">android</code> CLI installed?</strong> See the <code class="language-plaintext highlighter-rouge">android-cli</code> skill for installation; it’s a one-time setup. The <code class="language-plaintext highlighter-rouge">dumpsys meminfo</code> / <code class="language-plaintext highlighter-rouge">getprop</code> / screenshot channels still work via raw <code class="language-plaintext highlighter-rouge">adb</code>, but the layout JSON channel requires the CLI’s bridge.</p>
+
+<p><strong>Layout channel needs an Accessibility window.</strong> <code class="language-plaintext highlighter-rouge">android layout</code> reads via <code class="language-plaintext highlighter-rouge">uiautomator</code>, which sometimes returns empty when no Activity is in the foreground or the screen is locked. Wake the device (<code class="language-plaintext highlighter-rouge">adb shell input keyevent KEYCODE_WAKEUP</code>) and ensure your app is in the foreground before capturing.</p>
+
+<p><strong>Diff size sanity.</strong> The snapshot bundle for a busy screen can be 100+ KB JSON. Diffs over 30 KB should always be delegated to a Sonnet sub-agent rather than read inline; the JSON tree’s verbosity makes inline reading expensive. Pass the file path, not the content.</p>
+
+<p><strong>Same device for A and B.</strong> Memory categories vary across OEMs and device states (recent dexopt, recent reboot). Don’t compare a snapshot from a Pixel emulator to one from a physical Galaxy — same device, same emulator instance, ideally same boot.</p>
+
+<h2 id="what-goes-in-a-snapshot-bundle">What goes in a snapshot bundle</h2>
+
+<p>Pick the channels relevant to your question. Don’t capture all four every time — diffing noise wastes tokens.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Channel</th>
+      <th>Captures</th>
+      <th>Command</th>
+      <th>Best for</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Layout JSON</strong></td>
+      <td>On-screen UI tree, text, ids, bounds, state</td>
+      <td><code class="language-plaintext highlighter-rouge">android layout --pretty -o /tmp/snap-A-layout.json</code></td>
+      <td>“Did the UI change?”</td>
+    </tr>
+    <tr>
+      <td><strong><code class="language-plaintext highlighter-rouge">dumpsys meminfo</code></strong></td>
+      <td>App memory usage by category (Native, Dalvik, Graphics, etc.)</td>
+      <td><code class="language-plaintext highlighter-rouge">adb shell dumpsys meminfo &lt;pkg&gt; &gt; /tmp/snap-A-mem.txt</code></td>
+      <td>Leaks</td>
+    </tr>
+    <tr>
+      <td><strong><code class="language-plaintext highlighter-rouge">getprop</code></strong></td>
+      <td>All system properties</td>
+      <td><code class="language-plaintext highlighter-rouge">adb shell getprop &gt; /tmp/snap-A-props.txt</code></td>
+      <td>Verifying <code class="language-plaintext highlighter-rouge">setprop</code> flips landed</td>
+    </tr>
+    <tr>
+      <td><strong>Screenshot</strong></td>
+      <td>Pixel-exact UI</td>
+      <td><code class="language-plaintext highlighter-rouge">android screen capture -o /tmp/snap-A.png</code></td>
+      <td>Visual fidelity comparisons</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="workflow">Workflow</h2>
+
+<h3 id="1-capture-point-a--the-baseline">1. Capture point A — the baseline</h3>
+
+<p>Pick the channels you need:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>android layout <span class="nt">--pretty</span> <span class="nt">-o</span> /tmp/snap-A-layout.json
+adb shell dumpsys meminfo com.example.app <span class="o">&gt;</span> /tmp/snap-A-mem.txt
+</code></pre></div></div>
+
+<p>Use a consistent label (<code class="language-plaintext highlighter-rouge">A</code> / <code class="language-plaintext highlighter-rouge">B</code>, or a descriptive pair like <code class="language-plaintext highlighter-rouge">pre-rotation</code> / <code class="language-plaintext highlighter-rouge">post-rotation</code>) so the file pairs are obvious.</p>
+
+<h3 id="2-perform-the-action">2. Perform the action</h3>
+
+<p>A single, deterministic action — tap, navigation, rotation, fix-deploy. If you do five things between snapshots, you can’t attribute the diff to any one of them.</p>
+
+<p>For leak hunting, repeat the action N times (10 is usually enough):</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">for </span>i <span class="k">in</span> <span class="o">{</span>1..10<span class="o">}</span><span class="p">;</span> <span class="k">do
+    </span>adb shell input tap 500 1200          <span class="c"># open detail</span>
+    <span class="nb">sleep </span>1
+    adb shell input keyevent KEYCODE_BACK  <span class="c"># back to list</span>
+    <span class="nb">sleep </span>1
+<span class="k">done</span>
+</code></pre></div></div>
+
+<h3 id="3-capture-point-b">3. Capture point B</h3>
+
+<p>Same channels, same labels but <code class="language-plaintext highlighter-rouge">B</code>:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>android layout <span class="nt">--pretty</span> <span class="nt">-o</span> /tmp/snap-B-layout.json
+adb shell dumpsys meminfo com.example.app <span class="o">&gt;</span> /tmp/snap-B-mem.txt
+</code></pre></div></div>
+
+<h3 id="4-diff-and-delegate">4. Diff and delegate</h3>
+
+<p>For layout, use the JSON tree diff:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>android layout <span class="nt">--diff</span> <span class="nt">--pretty</span> <span class="nt">-o</span> /tmp/snap-AB-layout-diff.json
+</code></pre></div></div>
+
+<p>(<code class="language-plaintext highlighter-rouge">--diff</code> returns only elements that changed since the last <code class="language-plaintext highlighter-rouge">android layout</code> call — see <code class="language-plaintext highlighter-rouge">verify-android-layout</code> for the full JSON shape.)</p>
+
+<p>For meminfo and getprop, plain <code class="language-plaintext highlighter-rouge">diff</code>:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>diff /tmp/snap-A-mem.txt /tmp/snap-B-mem.txt <span class="o">&gt;</span> /tmp/snap-AB-mem-diff.txt
+diff /tmp/snap-A-props.txt /tmp/snap-B-props.txt <span class="o">&gt;</span> /tmp/snap-AB-props-diff.txt
+</code></pre></div></div>
+
+<h3 id="5-delegate-parsing">5. Delegate parsing</h3>
+
+<p>Diffs are usually short, but meminfo diffs across many channels are wide. Spawn a Sonnet sub-agent with a self-contained prompt:</p>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/snap-AB-mem-diff.txt</code>. Compare TOTAL PSS, Native Heap, Dalvik Heap, and Graphics between A and B. Return each as <code class="language-plaintext highlighter-rouge">A → B (delta)</code>. Flag any category that grew by more than 1 MB. Under 50 words. <code class="language-plaintext highlighter-rouge">model: "sonnet"</code>.</p>
+</blockquote>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/snap-AB-layout-diff.json</code>. Confirm: (a) no element with text=”Confirm dialog” remains, (b) the list (<code class="language-plaintext highlighter-rouge">resourceId</code> containing <code class="language-plaintext highlighter-rouge">recycler_view</code>) is back in focus. Answer YES/NO + one sentence. <code class="language-plaintext highlighter-rouge">model: "sonnet"</code>.</p>
+</blockquote>
+
+<p>For screenshots, see <code class="language-plaintext highlighter-rouge">verify-android-screen</code> for the delegation pattern.</p>
+
+<h2 id="reading-meminfo-for-leaks">Reading meminfo for leaks</h2>
+
+<p>The headline number is <strong>TOTAL PSS</strong> at the bottom of the report. For a true leak hunt, run the action 10 times and watch the trend across multiple snapshots — single A→B can be noise.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Pattern</th>
+      <th>Likely meaning</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TOTAL PSS grows ~equally on each cycle</td>
+      <td>Real leak — typically activity, view, or listener retention</td>
+    </tr>
+    <tr>
+      <td>TOTAL PSS grows once, then plateaus</td>
+      <td>Cold cache fill, not a leak</td>
+    </tr>
+    <tr>
+      <td>Native Heap grows; Dalvik flat</td>
+      <td>Native (NDK / image decoder) leak, or Bitmap pool growth</td>
+    </tr>
+    <tr>
+      <td>Dalvik grows; Native flat</td>
+      <td>JVM-side leak — static refs, escaping <code class="language-plaintext highlighter-rouge">inner class</code> references</td>
+    </tr>
+    <tr>
+      <td>Graphics grows</td>
+      <td>Bitmap retention; check <code class="language-plaintext highlighter-rouge">LeakCanary</code> if available</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>If suspicion remains, escalate: force GC between captures (<code class="language-plaintext highlighter-rouge">adb shell am send-trim-memory &lt;pkg&gt; COMPLETE</code>) and re-snapshot — leaks survive GC, caches don’t.</p>
+
+<h2 id="cleanup-gate">Cleanup gate</h2>
+
+<p>Snapshots are scratch:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">rm</span> /tmp/snap-<span class="k">*</span><span class="nt">-layout</span>.json /tmp/snap-<span class="k">*</span><span class="nt">-mem</span>.txt /tmp/snap-<span class="k">*</span><span class="nt">-props</span>.txt /tmp/snap-<span class="k">*</span>.png /tmp/snap-AB-<span class="k">*</span>.txt /tmp/snap-AB-<span class="k">*</span>.json
+</code></pre></div></div>
+
+<p>No source is touched, so the cleanup gate is light. But: if you used a custom label (e.g. <code class="language-plaintext highlighter-rouge">/tmp/login-pre.json</code>), grep for the label so you don’t leave stale files for the next investigation.</p>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Capturing all four channels every time</td>
+      <td>Pick the channels relevant to the question; diffing noise burns tokens</td>
+    </tr>
+    <tr>
+      <td>Two actions between snapshots</td>
+      <td>One action per A→B pair, or you can’t attribute the diff</td>
+    </tr>
+    <tr>
+      <td>Single A→B for leak detection</td>
+      <td>Single delta is noise; do 10 cycles and look at the trend</td>
+    </tr>
+    <tr>
+      <td>Reading the meminfo diff inline</td>
+      <td>Delegate to a Sonnet sub-agent with category-specific criteria</td>
+    </tr>
+    <tr>
+      <td>Skipping <code class="language-plaintext highlighter-rouge">android layout --diff</code> and re-dumping the full tree each time</td>
+      <td><code class="language-plaintext highlighter-rouge">--diff</code> returns only what changed and is dramatically smaller</td>
+    </tr>
+    <tr>
+      <td>Comparing snapshots from different devices</td>
+      <td>Heap categories differ across OEMs; same emulator/device for A and B</td>
+    </tr>
+    <tr>
+      <td>Not forcing GC before a leak snapshot</td>
+      <td>Trim memory (<code class="language-plaintext highlighter-rouge">am send-trim-memory &lt;pkg&gt; COMPLETE</code>) so caches collapse and leaks stand out</td>
+    </tr>
+    <tr>
+      <td>Leaving <code class="language-plaintext highlighter-rouge">/tmp/snap-*</code> files behind</td>
+      <td>Cleanup gate: <code class="language-plaintext highlighter-rouge">rm</code> the snapshot bundle when done</td>
+    </tr>
+  </tbody>
+</table>

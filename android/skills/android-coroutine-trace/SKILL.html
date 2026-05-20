@@ -1,0 +1,250 @@
+<h1 id="android-coroutine-trace--debugprobes-snapshot">Android Coroutine Trace — DebugProbes Snapshot</h1>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>“I called <code class="language-plaintext highlighter-rouge">launch { ... collect ... }</code> but no emissions arrive” — likely a job stuck in suspension</li>
+  <li>“Navigated away but the network call still completes 30s later” — leaked job</li>
+  <li>“Screen rotation, then UI never updates” — old <code class="language-plaintext highlighter-rouge">viewModelScope</code> job blocking new state</li>
+  <li>“Hangs sometimes, no crash, no log” — deadlock or missing resumer</li>
+  <li>Any time <code class="language-plaintext highlighter-rouge">android-probe-logging</code> shows <code class="language-plaintext highlighter-rouge">launch</code> fires but the body never completes</li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>The bug is a crash with a coroutine in the stack — read the stack from logcat</li>
+  <li>The bug is timing/perf — use <code class="language-plaintext highlighter-rouge">android-trace-sections</code> (Perfetto shows coroutine dispatches as scheduling events)</li>
+  <li>You haven’t confirmed the bug is in coroutine flow — start with <code class="language-plaintext highlighter-rouge">android-probe-logging</code></li>
+</ul>
+
+<h2 id="pre-flight-detect-what-your-project-supports">Pre-flight: detect what your project supports</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. Project uses kotlinx.coroutines and not some other concurrency primitive</span>
+<span class="nb">grep</span> <span class="nt">-r</span> <span class="s1">'kotlinx-coroutines-core\|kotlinx-coroutines-android'</span> <span class="se">\</span>
+    app/build.gradle<span class="k">*</span> gradle/libs.versions.toml 2&gt;/dev/null
+
+<span class="c"># 2. Coroutines version (DebugProbes is in coroutines-debug, version-matched)</span>
+<span class="nb">grep</span> <span class="nt">-E</span> <span class="s1">'kotlinx-coroutines.*([0-9]+\.[0-9]+\.[0-9]+)'</span> <span class="se">\</span>
+    app/build.gradle<span class="k">*</span> gradle/libs.versions.toml 2&gt;/dev/null
+
+<span class="c"># 3. androidx.core version (for ContextCompat.registerReceiver)</span>
+<span class="nb">grep</span> <span class="nt">-E</span> <span class="s1">'androidx.core'</span> app/build.gradle<span class="k">*</span> gradle/libs.versions.toml 2&gt;/dev/null
+
+<span class="c"># 4. Application subclass exists and is wired in the manifest</span>
+<span class="nb">grep</span> <span class="nt">-rE</span> <span class="s1">'class\s+\w+\s*:\s*Application|extends\s+Application'</span> <span class="se">\</span>
+    app/src/main/java app/src/main/kotlin 2&gt;/dev/null
+
+<span class="c"># 5. Project's Gradle DSL — Kotlin (.kts) or Groovy (no extension)</span>
+<span class="nb">ls </span>app/build.gradle.kts 2&gt;/dev/null <span class="o">&amp;&amp;</span> <span class="nb">echo</span> <span class="s2">"Kotlin DSL"</span> <span class="o">||</span> <span class="nb">echo</span> <span class="s2">"Groovy DSL"</span>
+</code></pre></div></div>
+
+<p><strong>Match the coroutines-debug version to your coroutines version.</strong> If your app uses <code class="language-plaintext highlighter-rouge">kotlinx-coroutines-core:1.7.3</code>, use <code class="language-plaintext highlighter-rouge">kotlinx-coroutines-debug:1.7.3</code>. Mismatched versions can ABI-clash at runtime (different <code class="language-plaintext highlighter-rouge">Continuation</code> shape, different debug field layout). The example above shows <code class="language-plaintext highlighter-rouge">1.8.1</code> — substitute your version.</p>
+
+<p><strong>Groovy DSL.</strong> Replace the Kotlin DSL line with:</p>
+
+<div class="language-groovy highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">debugImplementation</span> <span class="s1">'org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.8.1'</span>
+</code></pre></div></div>
+
+<p><strong>No <code class="language-plaintext highlighter-rouge">androidx.core</code> 1.9+ available.</strong> <code class="language-plaintext highlighter-rouge">ContextCompat.RECEIVER_NOT_EXPORTED</code> was added in <code class="language-plaintext highlighter-rouge">androidx.core:core 1.9.0</code>. If your project pins older, either bump it as a <code class="language-plaintext highlighter-rouge">debugImplementation</code>, or skip the broadcast pattern and dump to <code class="language-plaintext highlighter-rouge">getFilesDir()</code> + <code class="language-plaintext highlighter-rouge">adb pull</code> instead — both forms are functionally equivalent for the dump, the receiver is just convenient.</p>
+
+<p><strong>Java app.</strong> <code class="language-plaintext highlighter-rouge">DebugProbes</code> works identically from Java; the install call is <code class="language-plaintext highlighter-rouge">DebugProbes.INSTANCE.install()</code>. Coroutine-level bugs are mostly Kotlin-only, but a Java/Kotlin mixed project benefits from the Kotlin install path even when the suspect coroutine code is in a Kotlin file consumed by Java.</p>
+
+<h2 id="why-debugprobes">Why DebugProbes</h2>
+
+<p><code class="language-plaintext highlighter-rouge">kotlinx-coroutines-debug</code> ships a <code class="language-plaintext highlighter-rouge">DebugProbes</code> API that, once installed, tracks every active coroutine — its state (<code class="language-plaintext highlighter-rouge">RUNNING</code> / <code class="language-plaintext highlighter-rouge">SUSPENDED</code>), the suspension point’s stack, the coroutine’s launch-time stack, and parent/child relationships. <code class="language-plaintext highlighter-rouge">DebugProbes.dumpCoroutines()</code> prints the lot.</p>
+
+<p>This is the <strong>only way</strong> to see what your coroutines are <em>currently doing</em>. Logging tells you what they did. Profilers tell you what threads are doing. DebugProbes tells you what coroutines are <em>suspended on</em> — which is where bugs hide.</p>
+
+<h2 id="the-pattern-install-ephemerally--reproduce--dump--fix--remove">The pattern: install ephemerally → reproduce → dump → fix → remove</h2>
+
+<h3 id="1-add-the-debug-dependency-ephemeral">1. Add the debug dependency (ephemeral)</h3>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// app/build.gradle.kts — AGENT_DEBUGPROBES_&lt;id&gt;: temporary, remove before commit</span>
+<span class="nf">dependencies</span> <span class="p">{</span>
+    <span class="nf">debugImplementation</span><span class="p">(</span><span class="s">"org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.8.1"</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>Use <code class="language-plaintext highlighter-rouge">debugImplementation</code> so it’s never in release. Mark with the sentinel comment for cleanup.</p>
+
+<h3 id="2-install-in-applicationoncreate">2. Install in <code class="language-plaintext highlighter-rouge">Application.onCreate</code></h3>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">import</span> <span class="nn">kotlinx.coroutines.debug.DebugProbes</span>
+
+<span class="k">override</span> <span class="k">fun</span> <span class="nf">onCreate</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">super</span><span class="p">.</span><span class="nf">onCreate</span><span class="p">()</span>
+
+    <span class="c1">// AGENT_DEBUGPROBES_&lt;id&gt;: temporary probe — remove before commit</span>
+    <span class="k">if</span> <span class="p">(</span><span class="nc">BuildConfig</span><span class="p">.</span><span class="nc">DEBUG</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nc">DebugProbes</span><span class="p">.</span><span class="nf">install</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="c1">// ...</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">install()</code> is idempotent and adds modest overhead — fine for debug builds during a probe.</p>
+
+<h3 id="3-add-a-dump-trigger">3. Add a dump trigger</h3>
+
+<p>The simplest pattern: dump on a sentinel logcat tag whenever you want a snapshot. Add a temporary dev-menu button or, simpler, expose via <code class="language-plaintext highlighter-rouge">adb shell am broadcast</code>:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// In Application.onCreate, AGENT_DEBUGPROBES_&lt;id&gt;:</span>
+<span class="k">import</span> <span class="nn">androidx.core.content.ContextCompat</span>   <span class="c1">// androidx.core:core 1.9.0+</span>
+
+<span class="nc">ContextCompat</span><span class="p">.</span><span class="nf">registerReceiver</span><span class="p">(</span>
+    <span class="k">this</span><span class="p">,</span>
+    <span class="kd">object</span> <span class="err">: </span><span class="nc">BroadcastReceiver</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">override</span> <span class="k">fun</span> <span class="nf">onReceive</span><span class="p">(</span><span class="n">c</span><span class="p">:</span> <span class="nc">Context</span><span class="p">?,</span> <span class="n">i</span><span class="p">:</span> <span class="nc">Intent</span><span class="p">?)</span> <span class="p">{</span>
+            <span class="kd">val</span> <span class="py">out</span> <span class="p">=</span> <span class="nc">StringBuilder</span><span class="p">()</span>
+            <span class="nc">DebugProbes</span><span class="p">.</span><span class="nf">dumpCoroutines</span><span class="p">(</span><span class="n">java</span><span class="p">.</span><span class="n">io</span><span class="p">.</span><span class="nc">PrintStream</span><span class="p">(</span><span class="kd">object</span> <span class="err">: java.io.</span><span class="nc">OutputStream</span><span class="p">()</span> <span class="p">{</span>
+                <span class="k">override</span> <span class="k">fun</span> <span class="nf">write</span><span class="p">(</span><span class="n">b</span><span class="p">:</span> <span class="nc">Int</span><span class="p">)</span> <span class="p">{</span> <span class="k">out</span><span class="p">.</span><span class="nf">append</span><span class="p">(</span><span class="n">b</span><span class="p">.</span><span class="nf">toChar</span><span class="p">())</span> <span class="p">}</span>
+            <span class="p">}))</span>
+            <span class="n">android</span><span class="p">.</span><span class="n">util</span><span class="p">.</span><span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="s">"AGENT_DEBUGPROBES_a4f9c2e1"</span><span class="p">,</span> <span class="k">out</span><span class="p">.</span><span class="nf">toString</span><span class="p">())</span>
+        <span class="p">}</span>
+    <span class="p">},</span>
+    <span class="nc">IntentFilter</span><span class="p">(</span><span class="s">"AGENT_DUMP_COROUTINES"</span><span class="p">),</span>
+    <span class="nc">ContextCompat</span><span class="p">.</span><span class="nc">RECEIVER_NOT_EXPORTED</span>
+<span class="p">)</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">ContextCompat.registerReceiver</code> is required for <code class="language-plaintext highlighter-rouge">RECEIVER_NOT_EXPORTED</code> to work across all API levels — the <code class="language-plaintext highlighter-rouge">Context.RECEIVER_NOT_EXPORTED</code> constant was added in API 33, but <code class="language-plaintext highlighter-rouge">ContextCompat</code> handles older platforms gracefully. If your project doesn’t have <code class="language-plaintext highlighter-rouge">androidx.core:core</code> 1.9+, either add it as a <code class="language-plaintext highlighter-rouge">debugImplementation</code> for the probe, or skip the receiver and write directly to <code class="language-plaintext highlighter-rouge">/data/data/&lt;pkg&gt;/files/coroutine-dump.txt</code> plus <code class="language-plaintext highlighter-rouge">adb pull</code>.</p>
+
+<p>Then trigger from the host:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell am broadcast <span class="nt">-a</span> AGENT_DUMP_COROUTINES
+adb logcat <span class="nt">-d</span> <span class="nt">-s</span> AGENT_DEBUGPROBES_a4f9c2e1 <span class="o">&gt;</span> /tmp/coroutines-dump.txt
+</code></pre></div></div>
+
+<p>Alternatively, write directly to a file the app can write to and <code class="language-plaintext highlighter-rouge">adb pull</code> — but the broadcast/logcat path needs no permissions and works on any debug build.</p>
+
+<h3 id="4-drive-the-suspect-flow-then-dump">4. Drive the suspect flow, then dump</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. Get to the state where you suspect a stuck/leaked coroutine</span>
+adb shell input tap 540 1200
+<span class="nb">sleep </span>2
+
+<span class="c"># 2. Snapshot</span>
+adb logcat <span class="nt">-c</span>
+adb shell am broadcast <span class="nt">-a</span> AGENT_DUMP_COROUTINES
+<span class="nb">sleep </span>1
+adb logcat <span class="nt">-d</span> <span class="nt">-s</span> AGENT_DEBUGPROBES_a4f9c2e1 <span class="o">&gt;</span> /tmp/coroutines-dump.txt
+</code></pre></div></div>
+
+<p>For leak hunting, snapshot before <em>and</em> after navigating away. Coroutines from the prior screen that survive into the next snapshot are leaks.</p>
+
+<h3 id="5-read-the-dump">5. Read the dump</h3>
+
+<p>A coroutine entry looks like:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Coroutine "coroutine#42":StandaloneCoroutine{Active}, state: SUSPENDED
+    at kotlinx.coroutines.flow.internal.ChannelFlow.collect(ChannelFlow.kt:51)
+    at com.example.app.user.UserViewModel$observe$1.invokeSuspend(UserViewModel.kt:32)
+Created at:
+    at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith
+    at com.example.app.user.UserViewModel.observe(UserViewModel.kt:30)
+</code></pre></div></div>
+
+<p>Look for:</p>
+
+<ul>
+  <li><strong><code class="language-plaintext highlighter-rouge">state: SUSPENDED</code></strong> with no upstream emission expected → likely missing resumer</li>
+  <li><strong>Coroutines created in <code class="language-plaintext highlighter-rouge">xViewModel.observe()</code></strong> still active after the screen left → cancellation bug</li>
+  <li><strong>Multiple identical coroutines</strong> in the dump → <code class="language-plaintext highlighter-rouge">launch</code> called repeatedly without cancelling the previous job</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">state: RUNNING</code></strong> for a long-running job after navigation → blocking work that should have been cancelled</li>
+</ul>
+
+<p>Delegate to a Sonnet sub-agent for non-trivial dumps:</p>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/coroutines-dump.txt</code>. Group coroutines by state and by the first frame inside <code class="language-plaintext highlighter-rouge">com.example.app</code>. Return: (a) total active coroutines, (b) any coroutine SUSPENDED on a <code class="language-plaintext highlighter-rouge">Channel</code> or <code class="language-plaintext highlighter-rouge">Flow.collect</code>, (c) any duplicate launch points (same <code class="language-plaintext highlighter-rouge">Created at</code> line, multiple coroutines). Under 100 words. <code class="language-plaintext highlighter-rouge">model: "sonnet"</code>.</p>
+</blockquote>
+
+<h3 id="6-fix-and-re-verify">6. Fix and re-verify</h3>
+
+<p>After the fix, repeat steps 4–5. Expect:</p>
+
+<ul>
+  <li>Stuck coroutine should be RUNNING through to completion or properly cancelled</li>
+  <li>Leaked coroutine should not appear after navigating away</li>
+  <li>Duplicate-launch bugs should show one coroutine where there used to be N</li>
+</ul>
+
+<h3 id="7-cleanup-gate-blocking">7. Cleanup gate (BLOCKING)</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rg <span class="s1">'AGENT_DEBUGPROBES_|DebugProbes|coroutines-debug'</span>
+</code></pre></div></div>
+
+<p>Must return zero. Specifically remove:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">debugImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-debug:...")</code> from <code class="language-plaintext highlighter-rouge">build.gradle.kts</code></li>
+  <li><code class="language-plaintext highlighter-rouge">DebugProbes.install()</code> call from <code class="language-plaintext highlighter-rouge">Application.onCreate</code></li>
+  <li>The broadcast receiver registration (if you added one)</li>
+  <li>Any <code class="language-plaintext highlighter-rouge">import kotlinx.coroutines.debug.*</code> lines</li>
+</ul>
+
+<p>Then:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./gradlew :app:assembleDebug   <span class="c"># confirm it still builds without the dep</span>
+<span class="nb">rm</span> <span class="nt">-f</span> /tmp/coroutines-dump.txt
+</code></pre></div></div>
+
+<h2 id="patterns-this-skill-catches-well">Patterns this skill catches well</h2>
+
+<p><strong>Missing cancellation in <code class="language-plaintext highlighter-rouge">viewModelScope</code>:</strong></p>
+
+<p>Dump shows two coroutines from the same <code class="language-plaintext highlighter-rouge">observe()</code> line — one from before rotation, one from after. The first wasn’t cancelled. Fix: ensure the upstream flow is <code class="language-plaintext highlighter-rouge">stateIn(viewModelScope, ...)</code> or that you cancel the previous job before launching a new one.</p>
+
+<p><strong>Suspended on a never-completing <code class="language-plaintext highlighter-rouge">Channel</code>:</strong></p>
+
+<p>Dump shows <code class="language-plaintext highlighter-rouge">SUSPENDED at Channel.receive</code> for a coroutine whose upstream sender is gone. The sender side closed without notifying — fix the channel close path.</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">runBlocking</code> on the main thread:</strong></p>
+
+<p><code class="language-plaintext highlighter-rouge">RUNNING</code> state, <code class="language-plaintext highlighter-rouge">at runBlocking</code> in the stack, on the main dispatcher. That’s an ANR waiting to happen — should never <code class="language-plaintext highlighter-rouge">runBlocking</code> on main.</p>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Skipping the cleanup gate</td>
+      <td><code class="language-plaintext highlighter-rouge">rg 'DebugProbes\|coroutines-debug'</code> must return zero before commit</td>
+    </tr>
+    <tr>
+      <td>Using <code class="language-plaintext highlighter-rouge">implementation</code> instead of <code class="language-plaintext highlighter-rouge">debugImplementation</code></td>
+      <td>The dep would ship to release; always <code class="language-plaintext highlighter-rouge">debugImplementation</code></td>
+    </tr>
+    <tr>
+      <td>Forgetting to remove <code class="language-plaintext highlighter-rouge">DebugProbes.install()</code></td>
+      <td>The library may not be on the classpath in release → crash. Cleanup grep catches this.</td>
+    </tr>
+    <tr>
+      <td>Dumping mid-action</td>
+      <td><code class="language-plaintext highlighter-rouge">dumpCoroutines</code> is a snapshot; pause the flow at a steady state before dumping</td>
+    </tr>
+    <tr>
+      <td>Reading the full dump inline</td>
+      <td>Dumps are 100s of lines for non-trivial apps — delegate to Sonnet</td>
+    </tr>
+    <tr>
+      <td>Single dump for leak detection</td>
+      <td>Snapshot before AND after navigating away; coroutines that survive are the leaks</td>
+    </tr>
+    <tr>
+      <td>Treating SUSPENDED as a bug</td>
+      <td>SUSPENDED is normal for flow collectors; the bug is <em>unexpected</em> SUSPENDED, e.g. on a closed channel</td>
+    </tr>
+    <tr>
+      <td>Confusing “Created at” with “current location”</td>
+      <td>Top of the dump is current suspension point; “Created at” is launch site — both matter, for different reasons</td>
+    </tr>
+  </tbody>
+</table>

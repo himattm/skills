@@ -1,0 +1,200 @@
+<h1 id="android-probe-logging--ephemeral-logd-instrumentation">Android Probe Logging — Ephemeral Log.d Instrumentation</h1>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>Confirming a branch, callback, or lambda actually ran</li>
+  <li>Tracing the order of async / coroutine operations</li>
+  <li>Inspecting the actual values flowing through a function (params, return, intermediate state)</li>
+  <li>Disambiguating “the fix didn’t work” from “the fix never ran”</li>
+  <li>Verifying a <code class="language-plaintext highlighter-rouge">when</code> / <code class="language-plaintext highlighter-rouge">if</code> arm landed where you expected</li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>The question is about UI state — use <code class="language-plaintext highlighter-rouge">verify-android-layout</code> instead</li>
+  <li>The question is about main-thread blocking or leaks — use <code class="language-plaintext highlighter-rouge">android-strictmode-probe</code></li>
+  <li>The question is “is this code expensive / on which thread?” — use <code class="language-plaintext highlighter-rouge">android-trace-sections</code></li>
+  <li>The question is “which of 1000 commits broke it?” — use <code class="language-plaintext highlighter-rouge">android-regression-diff-scan</code></li>
+</ul>
+
+<h2 id="pre-flight-detect-what-your-project-supports">Pre-flight: detect what your project supports</h2>
+
+<p>Before instrumenting, confirm two things:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. adb is connected and the device is authorized</span>
+adb devices                                    <span class="c"># expect "&lt;id&gt;  device"</span>
+
+<span class="c"># 2. The package builds and installs in debug</span>
+<span class="nb">ls </span>app/src/main/java app/src/main/kotlin 2&gt;/dev/null    <span class="c"># which language?</span>
+</code></pre></div></div>
+
+<p><strong>Language note.</strong> The examples below use Kotlin (<code class="language-plaintext highlighter-rouge">private const val PROBE = ...</code>). For a Java codebase, the equivalent is:</p>
+
+<div class="language-java highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="nc">String</span> <span class="no">PROBE</span> <span class="o">=</span> <span class="s">"AGENT_PROBE_a4f9c2e1"</span><span class="o">;</span>
+<span class="c1">// ...</span>
+<span class="nc">Log</span><span class="o">.</span><span class="na">d</span><span class="o">(</span><span class="no">PROBE</span><span class="o">,</span> <span class="s">"fetchUser id="</span> <span class="o">+</span> <span class="n">id</span> <span class="o">+</span> <span class="s">" cached="</span> <span class="o">+</span> <span class="n">cache</span><span class="o">.</span><span class="na">contains</span><span class="o">(</span><span class="n">id</span><span class="o">));</span>
+</code></pre></div></div>
+
+<p>The cleanup grep for <code class="language-plaintext highlighter-rouge">AGENT_PROBE_</code> catches both forms — sentinel hygiene is language-agnostic.</p>
+
+<p><strong>Mixed Kotlin/Java module.</strong> Place the constant in whichever language the file you’re probing uses; mixing is fine since <code class="language-plaintext highlighter-rouge">String</code> is <code class="language-plaintext highlighter-rouge">String</code> on the JVM.</p>
+
+<p><strong>No Android Log import in the file?</strong> Add <code class="language-plaintext highlighter-rouge">import android.util.Log</code> (Kotlin) or it’s resolvable as <code class="language-plaintext highlighter-rouge">Log.d(...)</code> once <code class="language-plaintext highlighter-rouge">android.util.Log</code> is on the classpath (always true for an app module). Lint may flag the import on cleanup — make sure <code class="language-plaintext highlighter-rouge">rg 'AGENT_PROBE_'</code> is empty before relying on lint, since stale probes can keep an unused import alive.</p>
+
+<h2 id="the-pattern-probe--run--observe--remove">The pattern: probe → run → observe → remove</h2>
+
+<p>The shape is non-negotiable. The most common failure mode is leaving probes in committed code. The unique sentinel tag is what makes cleanup tractable.</p>
+
+<h3 id="1-pick-a-sentinel-tag-for-this-investigation">1. Pick a sentinel tag for this investigation</h3>
+
+<p>Generate a short unique id and bake it into the tag:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">private</span> <span class="k">const</span> <span class="kd">val</span> <span class="py">PROBE</span> <span class="p">=</span> <span class="s">"AGENT_PROBE_a4f9c2e1"</span>
+</code></pre></div></div>
+
+<p>One id per investigation. Don’t reuse across sessions — leftover probes from yesterday will pollute today’s logs.</p>
+
+<h3 id="2-insert-probes-at-decision-boundaries">2. Insert probes at decision boundaries</h3>
+
+<p>Probe at points where execution order or state is non-obvious:</p>
+
+<ul>
+  <li>Branch entries (<code class="language-plaintext highlighter-rouge">if</code>, <code class="language-plaintext highlighter-rouge">when</code>, <code class="language-plaintext highlighter-rouge">else</code>)</li>
+  <li>Before and after suspect calls</li>
+  <li>Inside lambdas, callbacks, coroutine <code class="language-plaintext highlighter-rouge">launch</code> / <code class="language-plaintext highlighter-rouge">collect</code> blocks</li>
+  <li>Early returns</li>
+</ul>
+
+<p><strong>Log inputs and outputs, not “got here”:</strong></p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Bad — tells you nothing you didn't already guess</span>
+<span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"in fetchUser"</span><span class="p">)</span>
+
+<span class="c1">// Good — captures the actual data</span>
+<span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"fetchUser id=$id cached=${cache.contains(id)}"</span><span class="p">)</span>
+<span class="c1">// ... call ...</span>
+<span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"fetchUser id=$id -&gt; ${result.javaClass.simpleName}"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>For exceptions, log the type and message but not full stack — <code class="language-plaintext highlighter-rouge">adb logcat</code> will already have the stack from <code class="language-plaintext highlighter-rouge">AndroidRuntime</code> if it propagates:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nf">runCatching</span> <span class="p">{</span> <span class="nf">suspectCall</span><span class="p">()</span> <span class="p">}</span>
+    <span class="p">.</span><span class="nf">onFailure</span> <span class="p">{</span> <span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"suspectCall threw ${it::class.simpleName}: ${it.message}"</span><span class="p">)</span> <span class="p">}</span>
+    <span class="p">.</span><span class="nf">onSuccess</span> <span class="p">{</span> <span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"suspectCall ok=$it"</span><span class="p">)</span> <span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="3-redeploy-and-drive-the-app">3. Redeploy and drive the app</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>android run                             <span class="c"># or your usual deploy command</span>
+adb logcat <span class="nt">-c</span>                           <span class="c"># clear stale logs</span>
+<span class="c"># ... drive the app to the suspect state via taps/swipes/input ...</span>
+adb logcat <span class="nt">-d</span> <span class="nt">-s</span> AGENT_PROBE_a4f9c2e1 <span class="o">&gt;</span> /tmp/probe-a4f9c2e1.log
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">-c</code> clears, <code class="language-plaintext highlighter-rouge">-d</code> dumps and exits, <code class="language-plaintext highlighter-rouge">-s &lt;tag&gt;</code> filters to your sentinel only. The output file should contain only your probe lines.</p>
+
+<h3 id="4-delegate-parsing-for-anything-non-trivial">4. Delegate parsing for anything non-trivial</h3>
+
+<p>Inline-read the log if it’s under ~30 lines. Otherwise spawn a Sonnet sub-agent with a self-contained prompt:</p>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/probe-a4f9c2e1.log</code>. Confirm the sequence: (a) <code class="language-plaintext highlighter-rouge">fetchUser</code> called with <code class="language-plaintext highlighter-rouge">id=42</code>, (b) cache miss, (c) network branch entered, (d) result logged with class <code class="language-plaintext highlighter-rouge">User</code>. Answer YES/NO + one sentence on what’s missing or out of order. Under 40 words.</p>
+</blockquote>
+
+<p>Pass <code class="language-plaintext highlighter-rouge">model: "sonnet"</code> — narrow text parsing doesn’t need Opus.</p>
+
+<h3 id="5-cleanup-gate-blocking--do-not-skip">5. Cleanup gate (BLOCKING — do not skip)</h3>
+
+<p>Before declaring the task done, run from the repo root:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rg <span class="s1">'AGENT_PROBE_a4f9c2e1'</span>
+</code></pre></div></div>
+
+<p>(Substitute your investigation’s id.) <strong>The expected output is empty.</strong> If it’s not, remove every match — including the <code class="language-plaintext highlighter-rouge">private const val PROBE = ...</code> declaration line — and run again. Only then is the task done.</p>
+
+<p>If you used multiple sentinel ids across one investigation, grep for the shared prefix to catch them all:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rg <span class="s1">'AGENT_PROBE_'</span>
+</code></pre></div></div>
+
+<p>This is the single most-skipped step. Sentinel tags exist precisely to make this gate trivial; use them.</p>
+
+<h2 id="probe-placement-examples">Probe placement examples</h2>
+
+<p><strong>Coroutine flow</strong> — confirm collection actually fires:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">viewModelScope</span><span class="p">.</span><span class="nf">launch</span> <span class="p">{</span>
+    <span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"collect start state=${_state.value}"</span><span class="p">)</span>
+    <span class="n">repository</span><span class="p">.</span><span class="nf">observeUser</span><span class="p">()</span>
+        <span class="p">.</span><span class="nf">onEach</span> <span class="p">{</span> <span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"emit ${it.id}"</span><span class="p">)</span> <span class="p">}</span>
+        <span class="p">.</span><span class="nf">collect</span> <span class="p">{</span>
+            <span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"collect received ${it.id}"</span><span class="p">)</span>
+            <span class="n">_state</span><span class="p">.</span><span class="n">value</span> <span class="p">=</span> <span class="n">it</span>
+        <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Conditional logic</strong> — confirm which arm executes:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">when</span> <span class="p">(</span><span class="n">status</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nc">Status</span><span class="p">.</span><span class="nc">Loading</span> <span class="p">-&gt;</span> <span class="p">{</span> <span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"Loading arm"</span><span class="p">);</span> <span class="cm">/* ... */</span> <span class="p">}</span>
+    <span class="nc">Status</span><span class="p">.</span><span class="nc">Error</span> <span class="p">-&gt;</span> <span class="p">{</span> <span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"Error arm err=${error?.message}"</span><span class="p">);</span> <span class="cm">/* ... */</span> <span class="p">}</span>
+    <span class="nc">Status</span><span class="p">.</span><span class="nc">Success</span> <span class="p">-&gt;</span> <span class="p">{</span> <span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"Success arm n=${data.size}"</span><span class="p">);</span> <span class="cm">/* ... */</span> <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Compose recomposition</strong> — confirm a composable re-runs:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@Composable</span>
+<span class="k">fun</span> <span class="nf">UserRow</span><span class="p">(</span><span class="n">user</span><span class="p">:</span> <span class="nc">User</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nc">Log</span><span class="p">.</span><span class="nf">d</span><span class="p">(</span><span class="nc">PROBE</span><span class="p">,</span> <span class="s">"UserRow recompose id=${user.id} v=${user.version}"</span><span class="p">)</span>
+    <span class="c1">// ...</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Skipping the cleanup gate</td>
+      <td><code class="language-plaintext highlighter-rouge">rg 'AGENT_PROBE_'</code> must return zero before commit; this is non-negotiable</td>
+    </tr>
+    <tr>
+      <td>Generic tag like <code class="language-plaintext highlighter-rouge">"DEBUG"</code> or <code class="language-plaintext highlighter-rouge">"TAG"</code></td>
+      <td>Use a unique <code class="language-plaintext highlighter-rouge">AGENT_PROBE_&lt;8-char-id&gt;</code> per investigation so cleanup is greppable</td>
+    </tr>
+    <tr>
+      <td>Probe says “got here” with no data</td>
+      <td>Log the actual inputs/outputs; “got here” tells you nothing you didn’t already guess</td>
+    </tr>
+    <tr>
+      <td>Reading a 500-line probe log inline</td>
+      <td>Delegate to a Sonnet sub-agent with explicit criteria and a return-format cap</td>
+    </tr>
+    <tr>
+      <td>Forgetting <code class="language-plaintext highlighter-rouge">adb logcat -c</code> before driving the app</td>
+      <td>Stale logs from earlier runs will mix in and confuse the sub-agent’s verdict</td>
+    </tr>
+    <tr>
+      <td>Reusing yesterday’s sentinel id</td>
+      <td>Old probes from a prior investigation pollute today’s results — fresh id each time</td>
+    </tr>
+    <tr>
+      <td>Letting the sub-agent default to Opus</td>
+      <td>Always pass <code class="language-plaintext highlighter-rouge">model: "sonnet"</code> — narrow text parsing</td>
+    </tr>
+    <tr>
+      <td>Committing the <code class="language-plaintext highlighter-rouge">private const val PROBE</code> line</td>
+      <td>The sentinel constant counts as a probe; the cleanup grep catches it, remove it too</td>
+    </tr>
+  </tbody>
+</table>

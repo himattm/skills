@@ -1,0 +1,39 @@
+<h1 id="interrogation">Interrogation</h1>
+
+<p>The user gave you a prompt that’s likely under-specified. Drill in with structured questions before doing the work, so the output lands on the first try instead of needing a redo.</p>
+
+<h2 id="workflow">Workflow</h2>
+
+<ol>
+  <li><strong>Read the prompt carefully.</strong> Identify the 2–4 ambiguities that, if guessed wrong, would lead to materially different output. These are the only things worth asking about.</li>
+  <li><strong>Ask via <code class="language-plaintext highlighter-rouge">AskUserQuestion</code>.</strong> Batch related questions into one call — never one question per turn. Use multiple-choice when the answer space is bounded; use a free-form option for open ends.</li>
+  <li><strong>Outline your understanding after every answer.</strong> Don’t silently decide “I have enough.” Write a short, high-level outline of what you now think the user wants — scope, output shape, key choices — so the user can see your mental model and correct it before more time is invested. Bullet points are fine. Keep it to ~5 lines.</li>
+  <li><strong>Iterate at most twice more.</strong> If the outline reveals a remaining ambiguity, ask another batched round. If the user confirms the outline (or says “go” / “ship it”), stop. Three rounds maximum.</li>
+  <li><strong>Final confirm and proceed.</strong> Once the outline matches, restate the agreed plan in one paragraph and begin the work.</li>
+</ol>
+
+<h2 id="what-to-ask-about">What to ask about</h2>
+
+<ul>
+  <li><strong>Scope</strong> — what’s in, what’s out</li>
+  <li><strong>Output shape</strong> — file? PR? branch? message? what does “done” look like?</li>
+  <li><strong>Hard constraints</strong> — must use X, can’t touch Y, deadline, audience</li>
+  <li><strong>Judgement calls the user has a view on</strong> — speed vs. polish, convention vs. novelty</li>
+</ul>
+
+<h2 id="what-not-to-ask">What NOT to ask</h2>
+
+<ul>
+  <li>Anything answerable from the codebase, recent context, or <code class="language-plaintext highlighter-rouge">CLAUDE.md</code></li>
+  <li>Stylistic micro-decisions — pick the codebase convention silently</li>
+  <li>Things the user already answered earlier in the session</li>
+  <li>Yes/no when a multiple-choice would be more decisive</li>
+</ul>
+
+<h2 id="stop-conditions">Stop conditions</h2>
+
+<ul>
+  <li>The user confirms your outline (mental models match)</li>
+  <li>The user says “go”, “ship it”, “you have enough”, or equivalent</li>
+  <li>Three rounds in, further questions would scope-creep rather than clarify</li>
+</ul>

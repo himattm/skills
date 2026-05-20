@@ -1,0 +1,105 @@
+<h1 id="verify-android-ui-via-screenshot">Verify Android UI via Screenshot</h1>
+
+<h2 id="when-to-reach-for-this-skill">When to reach for this skill</h2>
+
+<p>Use a screenshot only when the JSON layout tree can’t answer the question:</p>
+
+<ul>
+  <li><strong>WebView content</strong> — web markup doesn’t appear in <code class="language-plaintext highlighter-rouge">android layout</code></li>
+  <li><strong>Animations or transitions</strong> — <code class="language-plaintext highlighter-rouge">layout</code> may fail or return partial state mid-frame</li>
+  <li><strong>Visual fidelity</strong> — colors, fonts, image content, spacing, alignment polish</li>
+  <li><strong>Finding by appearance</strong> — locating an element when you don’t know its <code class="language-plaintext highlighter-rouge">resourceId</code> or <code class="language-plaintext highlighter-rouge">text</code></li>
+</ul>
+
+<p><strong>For everything else, use <code class="language-plaintext highlighter-rouge">verify-android-layout</code> first.</strong> A JSON dump is strictly cheaper than a vision-token screenshot for “did the element appear?” / “is the input focused?” / “did the text update?” style questions.</p>
+
+<h2 id="why-delegate">Why delegate</h2>
+
+<p>A single screenshot is a large image payload. Reading it in the main thread burns tokens fast — across an iteration loop, inline reads pollute the conversation and balloon context. <strong>Always delegate to a sub-agent.</strong> It reads the image, returns a short text answer, and the bytes never enter the main thread.</p>
+
+<h2 id="workflow">Workflow</h2>
+
+<ol>
+  <li><strong>Capture</strong> to a tmp path:
+    <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>android screen capture <span class="nt">-o</span> /tmp/&lt;descriptive-name&gt;.png
+</code></pre></div>    </div>
+    <p>Add <code class="language-plaintext highlighter-rouge">--device &lt;serial&gt;</code> if multiple devices are connected.</p>
+  </li>
+  <li><strong>Spawn a sub-agent</strong> (<code class="language-plaintext highlighter-rouge">general-purpose</code> or <code class="language-plaintext highlighter-rouge">Explore</code>) with <strong><code class="language-plaintext highlighter-rouge">model: "sonnet"</code></strong> and a self-contained prompt that includes:
+    <ul>
+      <li>The exact file path to read</li>
+      <li>Specific, concrete validation criteria — what should be on screen, what shouldn’t, where to look</li>
+      <li>The expected return format (“YES/NO + one sentence”, “under 40 words”)</li>
+    </ul>
+  </li>
+  <li><strong>Act on the text answer.</strong> Do NOT Read the screenshot yourself.</li>
+</ol>
+
+<h2 id="annotated-screenshots--finding-elements-by-appearance">Annotated screenshots — finding elements by appearance</h2>
+
+<p>When you need to interact with an element that doesn’t show up in <code class="language-plaintext highlighter-rouge">android layout</code> (or you can’t identify it by <code class="language-plaintext highlighter-rouge">resourceId</code>):</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>android screen capture <span class="nt">--annotate</span> <span class="nt">-o</span> /tmp/annotated.png
+</code></pre></div></div>
+
+<p>This overlays numbered labels and bounding boxes on every UI element. Have the sub-agent identify the label number for the element you want, then resolve to coordinates:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell input tap <span class="si">$(</span>android screen resolve <span class="nt">--screen</span> /tmp/annotated.png <span class="nt">--string</span> <span class="s2">"tap #34"</span><span class="si">)</span>
+</code></pre></div></div>
+
+<p>The chained form lets you tap a numbered annotation in a single command.</p>
+
+<h2 id="example-sub-agent-prompts">Example sub-agent prompts</h2>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/reader-after-hold.png</code>. Verify: (a) a single large word is centered in the upper third with a red ORP letter, (b) the bottom inline-context strip is visible, (c) no code block is shown — we expect a paused image break with caption “Pipeline diagram”. Answer in under 40 words: did all three pass? If not, which failed and what’s actually visible?</p>
+</blockquote>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/annotated.png</code>. Find the “Sign in” button — return only its label number (e.g. <code class="language-plaintext highlighter-rouge">#7</code>). If multiple candidates, pick the most prominent. One token answer.</p>
+</blockquote>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/webview-state.png</code>. The page should show a logged-in user header with avatar in the top-right and a “Welcome back” greeting. Under 30 words: present or not, and what’s actually shown?</p>
+</blockquote>
+
+<h2 id="why-sonnet-not-opus">Why Sonnet, not Opus</h2>
+
+<p>The task is narrow: read one image, check 2–3 criteria, return a sentence. Sonnet is multimodal and much cheaper than Opus for this. Haiku also works for very simple criteria. <strong>Always pass <code class="language-plaintext highlighter-rouge">model: "sonnet"</code></strong> when spawning the verification sub-agent — never let it default to Opus.</p>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Reaching for a screenshot when JSON would answer</td>
+      <td>Try <code class="language-plaintext highlighter-rouge">verify-android-layout</code> first; screenshots are the fallback</td>
+    </tr>
+    <tr>
+      <td>Reading the screenshot inline “just to check quickly”</td>
+      <td>The bytes are massive even for a quick peek. Always delegate.</td>
+    </tr>
+    <tr>
+      <td>Vague criteria (“does it look right?”)</td>
+      <td>Spell out what should/shouldn’t be on screen and where</td>
+    </tr>
+    <tr>
+      <td>No return-format cap</td>
+      <td>Agents return long descriptions by default. Specify “under N words” or “YES/NO + one sentence”</td>
+    </tr>
+    <tr>
+      <td>Letting the sub-agent default to Opus</td>
+      <td>Pass <code class="language-plaintext highlighter-rouge">model: "sonnet"</code> explicitly every time</td>
+    </tr>
+    <tr>
+      <td>Forwarding the screenshot back to the main thread</td>
+      <td>Defeats the purpose. Sub-agent returns text only.</td>
+    </tr>
+  </tbody>
+</table>

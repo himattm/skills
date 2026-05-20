@@ -1,0 +1,261 @@
+<h1 id="android-runtime-flag-probe--framework-debug-without-code-changes">Android Runtime Flag Probe — Framework Debug Without Code Changes</h1>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>“Is the view bigger than I think?” — <code class="language-plaintext highlighter-rouge">debug.layout true</code> overlays bounds</li>
+  <li>“Is overdraw killing scroll perf?” — <code class="language-plaintext highlighter-rouge">debug.hwui.show_layers_updates true</code></li>
+  <li>“Are frames missing the budget?” — <code class="language-plaintext highlighter-rouge">debug.hwui.profile true</code></li>
+  <li>“Is this animation hiding a logic bug?” — <code class="language-plaintext highlighter-rouge">window_animation_scale 5</code> slows everything</li>
+  <li>“Is <code class="language-plaintext highlighter-rouge">Choreographer</code> complaining about slow frames?” — <code class="language-plaintext highlighter-rouge">log.tag.Choreographer VERBOSE</code></li>
+  <li>“Is <code class="language-plaintext highlighter-rouge">ActivityManager</code> firing the lifecycle transition I expect?” — <code class="language-plaintext highlighter-rouge">log.tag.ActivityManager VERBOSE</code></li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>The diagnostic needs your code’s data — use <code class="language-plaintext highlighter-rouge">android-probe-logging</code></li>
+  <li>The diagnostic needs precise timing — use <code class="language-plaintext highlighter-rouge">android-trace-sections</code></li>
+  <li>The diagnostic should ship — that’s a permanent change behind <code class="language-plaintext highlighter-rouge">BuildConfig.DEBUG</code>, not an ephemeral probe</li>
+</ul>
+
+<h2 id="pre-flight-detect-what-your-device-allows">Pre-flight: detect what your device allows</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. adb device authorized</span>
+adb devices                              <span class="c"># expect "&lt;id&gt;  device"</span>
+
+<span class="c"># 2. Build type — userdebug/eng images honor every flag; user (production)</span>
+<span class="c">#    images silently no-op some setprops</span>
+adb shell getprop ro.build.type          <span class="c"># expect "userdebug" or "eng"</span>
+
+<span class="c"># 3. Some debug.* properties require root or system_app context — check before</span>
+<span class="c">#    trusting that a flip took</span>
+adb shell getprop ro.debuggable          <span class="c"># 1 = full debug; 0 = production-locked</span>
+</code></pre></div></div>
+
+<p><strong>On <code class="language-plaintext highlighter-rouge">user</code> (production) builds</strong>, the following often silently no-op (the <code class="language-plaintext highlighter-rouge">setprop</code> returns success but the system ignores the value):</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">debug.cpu.throttle</code> (any value)</li>
+  <li><code class="language-plaintext highlighter-rouge">debug.hwui.show_layers_updates</code> (some OEM skins)</li>
+  <li><code class="language-plaintext highlighter-rouge">debug.atrace.tags.enableflags</code></li>
+</ul>
+
+<p>The <code class="language-plaintext highlighter-rouge">settings put global window_animation_scale</code> family always works because it lives in the Settings provider, not in system properties. <code class="language-plaintext highlighter-rouge">debug.layout</code> and <code class="language-plaintext highlighter-rouge">log.tag.&lt;Tag&gt;</code> work everywhere.</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">getprop</code> returning empty after <code class="language-plaintext highlighter-rouge">setprop</code></strong> is a common gotcha — it usually means the property exists but no consumer is reading it on this device. The flag isn’t broken on your end; the OS image just doesn’t honor it. Try the equivalent flag from the Settings provider, or use <code class="language-plaintext highlighter-rouge">android-trace-sections</code> for the same diagnostic.</p>
+
+<p><strong>No root, no userdebug.</strong> That’s the common case. Stick to <code class="language-plaintext highlighter-rouge">debug.layout</code>, <code class="language-plaintext highlighter-rouge">log.tag.&lt;Tag&gt;</code>, <code class="language-plaintext highlighter-rouge">debug.hwui.profile</code>, and the <code class="language-plaintext highlighter-rouge">settings put global ..._animation_scale</code> family — those work on every device.</p>
+
+<h2 id="the-flag-catalog">The flag catalog</h2>
+
+<h3 id="logging-verbosity-per-tag">Logging verbosity (per tag)</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell setprop log.tag.&lt;Tag&gt; VERBOSE
+</code></pre></div></div>
+
+<p>The framework reads this at <code class="language-plaintext highlighter-rouge">Log.isLoggable(tag, level)</code> time, so it works without app restart for tags checked dynamically. For tags checked once at startup, force-stop and re-launch the app.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Tag</th>
+      <th>Surfaces</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">Choreographer</code></td>
+      <td>Frame skips, “Skipped N frames” warnings escalate to verbose</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">ViewRootImpl</code></td>
+      <td>Touch dispatch, layout passes, draw scheduling</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">ActivityManager</code></td>
+      <td>Activity lifecycle transitions, ANR details</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">ConnectivityService</code></td>
+      <td>Network state changes</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">WindowManager</code></td>
+      <td>Window add/remove, focus changes</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">InputDispatcher</code></td>
+      <td>Touch dispatch internals</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>HTTP libraries don’t honor <code class="language-plaintext highlighter-rouge">log.tag.&lt;Tag&gt;</code>.</strong> OkHttp, Ktor, Retrofit, etc. don’t read Android’s <code class="language-plaintext highlighter-rouge">Log.isLoggable</code> — they use their own logger interfaces (e.g. <code class="language-plaintext highlighter-rouge">HttpLoggingInterceptor</code> for OkHttp). To get HTTP logging you have to wire the library’s interceptor in code, which makes it a <code class="language-plaintext highlighter-rouge">android-probe-logging</code> task, not a runtime-flag one.</p>
+
+<h3 id="layout--rendering-diagnostics">Layout / rendering diagnostics</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell setprop debug.layout <span class="nb">true</span>
+</code></pre></div></div>
+
+<p>Overlays a yellow border around every view’s bounds. Excellent for “padding looks wrong but I’m not sure what’s actually rendering.”</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell setprop debug.hwui.show_layers_updates <span class="nb">true</span>
+</code></pre></div></div>
+
+<p>Flashes the screen green where layers update — useful for finding overdraw or unnecessary invalidations.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell setprop debug.hwui.profile <span class="nb">true</span>
+</code></pre></div></div>
+
+<p>Renders frame-time bars at the bottom of the screen (the “GPU profiling” toggle from Developer Options). The colored stacks correspond to frame phases; bars over the green line are dropped frames.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell setprop debug.hwui.overdraw show
+</code></pre></div></div>
+
+<p>Tints surfaces by overdraw count (blue = 1×, green = 2×, red = 4×+). Pairs well with scroll-jank investigations.</p>
+
+<h3 id="system-settings-longer-lived">System Settings (longer-lived)</h3>
+
+<p>These use <code class="language-plaintext highlighter-rouge">settings put</code> rather than <code class="language-plaintext highlighter-rouge">setprop</code>:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell settings put global window_animation_scale 5
+adb shell settings put global transition_animation_scale 5
+adb shell settings put global animator_duration_scale 5
+</code></pre></div></div>
+
+<p>5× animation slowdown surfaces logic bugs that flash by at normal speed. Reset to <code class="language-plaintext highlighter-rouge">1</code> when done.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell settings put global ANGLE_GLES_DRIVER_ALL_ANGLE 1
+</code></pre></div></div>
+
+<p>(Forces the ANGLE GL driver — niche, for graphics regressions.)</p>
+
+<h2 id="workflow">Workflow</h2>
+
+<h3 id="1-pick-the-smallest-set-of-flags-that-answers-the-question">1. Pick the smallest set of flags that answers the question</h3>
+
+<p>Don’t flip everything. One or two flags per investigation. If you flip ten flags, you can’t attribute observations to any one of them.</p>
+
+<h3 id="2-apply-the-flags">2. Apply the flags</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Track what you flipped — write a reset script first</span>
+<span class="nb">cat</span> <span class="o">&gt;</span> /tmp/runtime-flag-reset.sh <span class="o">&lt;&lt;</span><span class="sh">'</span><span class="no">EOF</span><span class="sh">'
+#!/usr/bin/env bash
+adb shell setprop log.tag.Choreographer ""
+adb shell setprop debug.layout false
+adb shell settings put global window_animation_scale 1
+</span><span class="no">EOF
+</span><span class="nb">chmod</span> +x /tmp/runtime-flag-reset.sh
+
+<span class="c"># Then apply</span>
+adb shell setprop log.tag.Choreographer VERBOSE
+adb shell setprop debug.layout <span class="nb">true
+</span>adb shell settings put global window_animation_scale 5
+</code></pre></div></div>
+
+<p><strong>Always write the reset script first.</strong> That’s the cleanup gate’s input — and it ensures you can’t forget what you toggled.</p>
+
+<h3 id="3-restart-the-app-for-flags-read-at-startup">3. Restart the app for flags read at startup</h3>
+
+<p>Some flags only take effect on cold start:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell am force-stop com.example.app
+android run                              <span class="c"># or your usual deploy</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">debug.layout</code> is live; <code class="language-plaintext highlighter-rouge">log.tag.&lt;Tag&gt;</code> is live for <code class="language-plaintext highlighter-rouge">Log.isLoggable</code> checks but cached for tags evaluated at class load.</p>
+
+<h3 id="4-drive-the-suspect-flow--observe">4. Drive the suspect flow + observe</h3>
+
+<p>For visual flags (<code class="language-plaintext highlighter-rouge">debug.layout</code>, <code class="language-plaintext highlighter-rouge">hwui.profile</code>, <code class="language-plaintext highlighter-rouge">hwui.overdraw</code>), capture a screenshot:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>android screen capture <span class="nt">-o</span> /tmp/runtime-flag-screen.png
+</code></pre></div></div>
+
+<p>For log-tag flags, dump filtered logcat:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb logcat <span class="nt">-d</span> <span class="nt">-s</span> Choreographer:V ActivityManager:V <span class="o">&gt;</span> /tmp/runtime-flag-log.txt
+</code></pre></div></div>
+
+<p>Delegate parsing to a Sonnet sub-agent if either output is non-trivial.</p>
+
+<h3 id="5-cleanup-gate-blocking--most-skipped-step-in-the-suite">5. Cleanup gate (BLOCKING — most-skipped step in the suite)</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bash /tmp/runtime-flag-reset.sh
+</code></pre></div></div>
+
+<p>Then verify each flag is actually back to default:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell getprop debug.layout                <span class="c"># expect empty or false</span>
+adb shell getprop log.tag.Choreographer       <span class="c"># expect empty</span>
+adb shell settings get global window_animation_scale   <span class="c"># expect 1</span>
+</code></pre></div></div>
+
+<p>The classic failure mode of this skill: leaving <code class="language-plaintext highlighter-rouge">debug.layout true</code> on the emulator. Every screenshot in the <em>next</em> investigation has yellow borders, the agent thinks the UI is broken, and chases ghosts. <strong>Always verify the reset, don’t just run the script.</strong></p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">rm</span> <span class="nt">-f</span> /tmp/runtime-flag-reset.sh /tmp/runtime-flag-screen.png /tmp/runtime-flag-log.txt
+</code></pre></div></div>
+
+<h2 id="reset-reference-copy-paste">Reset reference (copy-paste)</h2>
+
+<p>If you’ve forgotten what you toggled, this resets the common flags:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>adb shell setprop debug.layout <span class="s2">""</span>
+adb shell setprop debug.hwui.show_layers_updates <span class="s2">""</span>
+adb shell setprop debug.hwui.profile <span class="s2">""</span>
+adb shell setprop debug.hwui.overdraw <span class="s2">""</span>
+adb shell settings put global window_animation_scale 1
+adb shell settings put global transition_animation_scale 1
+adb shell settings put global animator_duration_scale 1
+
+<span class="c"># Reset all log.tag overrides — there's no batch reset, so list yours</span>
+<span class="k">for </span>tag <span class="k">in </span>Choreographer ViewRootImpl ActivityManager ConnectivityService WindowManager InputDispatcher<span class="p">;</span> <span class="k">do
+    </span>adb shell setprop log.tag.<span class="nv">$tag</span> <span class="s2">""</span>
+<span class="k">done</span>
+</code></pre></div></div>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Skipping the cleanup gate</td>
+      <td>Verify each flag is reset with <code class="language-plaintext highlighter-rouge">getprop</code> / <code class="language-plaintext highlighter-rouge">settings get</code> — the reset script is necessary but not sufficient</td>
+    </tr>
+    <tr>
+      <td>Flipping ten flags at once</td>
+      <td>One or two flags per investigation; otherwise observations aren’t attributable</td>
+    </tr>
+    <tr>
+      <td>Forgetting to write the reset script first</td>
+      <td>Toggle and reset in one breath; otherwise you’ll forget what you flipped</td>
+    </tr>
+    <tr>
+      <td>Forgetting <code class="language-plaintext highlighter-rouge">force-stop</code> after a tag flip</td>
+      <td>Some tags are cached at class load; restart the app to pick up the new level</td>
+    </tr>
+    <tr>
+      <td>Leaving <code class="language-plaintext highlighter-rouge">window_animation_scale 5</code> on</td>
+      <td>Every later investigation runs in slow-motion — devastating to productivity</td>
+    </tr>
+    <tr>
+      <td>Trusting the reset script ran cleanly</td>
+      <td>A typo in the path silently no-ops; always verify with <code class="language-plaintext highlighter-rouge">getprop</code></td>
+    </tr>
+    <tr>
+      <td>Flipping <code class="language-plaintext highlighter-rouge">debug.layout</code> and not capturing a screenshot</td>
+      <td>The overlay is <em>visual</em> — you need a screenshot to read it</td>
+    </tr>
+    <tr>
+      <td>Using <code class="language-plaintext highlighter-rouge">setprop</code> for <code class="language-plaintext highlighter-rouge">window_animation_scale</code> (it’s a <code class="language-plaintext highlighter-rouge">settings</code>)</td>
+      <td>Animation scales live in <code class="language-plaintext highlighter-rouge">settings global</code>, not system properties</td>
+    </tr>
+  </tbody>
+</table>

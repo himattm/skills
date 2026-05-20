@@ -1,0 +1,253 @@
+<h1 id="android-trace-sections--perfetto-backed-code-probes">Android Trace Sections — Perfetto-Backed Code Probes</h1>
+
+<h2 id="why-trace-sections-beat-logging-for-performance">Why trace sections beat logging for performance</h2>
+
+<p><code class="language-plaintext highlighter-rouge">Log.d</code> answers “did this run.” Trace sections answer “did this run, on what thread, when, and how long” — with frame boundaries and other concurrent work in the same view. For any performance investigation that’s the difference between guessing and knowing.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Question</th>
+      <th>Logging answers</th>
+      <th>Tracing answers</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>“Did this code run?”</td>
+      <td>Yes</td>
+      <td>Yes</td>
+    </tr>
+    <tr>
+      <td>“On what thread?”</td>
+      <td>Only via <code class="language-plaintext highlighter-rouge">Thread.currentThread().name</code></td>
+      <td>Yes — visualized per-thread</td>
+    </tr>
+    <tr>
+      <td>“How long did it take?”</td>
+      <td>Only with manual timestamps</td>
+      <td>Microsecond-precise duration</td>
+    </tr>
+    <tr>
+      <td>“Did it block a frame?”</td>
+      <td>No</td>
+      <td>Yes — frame markers in the same view</td>
+    </tr>
+    <tr>
+      <td>“What ran concurrently?”</td>
+      <td>No</td>
+      <td>Yes — every thread visible at once</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="when-to-use">When to use</h2>
+
+<ul>
+  <li>“App janks during scroll” — wrap suspect adapter / Composable / RecyclerView paths</li>
+  <li>“Cold start is slow” — wrap <code class="language-plaintext highlighter-rouge">Application.onCreate</code>, <code class="language-plaintext highlighter-rouge">Activity.onCreate</code>, first <code class="language-plaintext highlighter-rouge">setContent</code></li>
+  <li>“Is this expensive call on the main thread?” — wrap and read the lane it lands in</li>
+  <li>“Does this finish within the frame budget?” — 16.6 ms (60 Hz) or 8.3 ms (120 Hz)</li>
+  <li>“Why is this <code class="language-plaintext highlighter-rouge">withContext(Dispatchers.IO)</code> block holding things up?” — wrap and see if it’s actually on IO</li>
+</ul>
+
+<h2 id="when-not-to-use">When NOT to use</h2>
+
+<ul>
+  <li>“Did this run at all?” — <code class="language-plaintext highlighter-rouge">android-probe-logging</code> is simpler</li>
+  <li>The bug is a crash or exception — read logcat</li>
+  <li>You need to inspect specific values — tracing supports key/value but logging is more flexible</li>
+</ul>
+
+<h2 id="pre-flight-detect-what-your-project-supports">Pre-flight: detect what your project supports</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. androidx.tracing on the classpath? (preferred for the trace { } lambda)</span>
+<span class="nb">grep</span> <span class="nt">-r</span> <span class="s1">'androidx.tracing'</span> app/build.gradle<span class="k">*</span> gradle/libs.versions.toml 2&gt;/dev/null
+
+<span class="c"># 2. minSdk — Trace.beginSection works on all APIs; Trace.beginAsyncSection</span>
+<span class="c">#    requires API 29+</span>
+<span class="nb">grep</span> <span class="nt">-E</span> <span class="s1">'minSdk'</span> app/build.gradle<span class="k">*</span> gradle/libs.versions.toml 2&gt;/dev/null
+
+<span class="c"># 3. Build is debuggable (Trace sections fire only in debuggable apps unless</span>
+<span class="c">#    the device is rooted)</span>
+<span class="nb">grep</span> <span class="nt">-A2</span> <span class="s1">'buildTypes'</span> app/build.gradle<span class="k">*</span> | <span class="nb">grep</span> <span class="nt">-i</span> <span class="s1">'debuggable'</span>
+</code></pre></div></div>
+
+<p><strong>No <code class="language-plaintext highlighter-rouge">androidx.tracing</code>?</strong> Two options:</p>
+
+<ul>
+  <li>Add <code class="language-plaintext highlighter-rouge">implementation("androidx.tracing:tracing-ktx:1.2.0")</code> (or <code class="language-plaintext highlighter-rouge">tracing</code> for the Java-only API). Keep this even after the probe — it’s tiny and useful long-term.</li>
+  <li>Use the platform <code class="language-plaintext highlighter-rouge">android.os.Trace</code> directly: <code class="language-plaintext highlighter-rouge">Trace.beginSection("...")</code> / <code class="language-plaintext highlighter-rouge">Trace.endSection()</code> work on every API level without any dependency. You lose the <code class="language-plaintext highlighter-rouge">trace { }</code> lambda but the slices come through identically.</li>
+</ul>
+
+<p><strong>Groovy DSL.</strong> Use single-quoted strings:</p>
+
+<div class="language-groovy highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">implementation</span> <span class="s1">'androidx.tracing:tracing-ktx:1.2.0'</span>
+</code></pre></div></div>
+
+<p><strong>Java codebase.</strong> <code class="language-plaintext highlighter-rouge">Trace.beginSection("AGENT_TRACE_&lt;id&gt;....")</code> / <code class="language-plaintext highlighter-rouge">Trace.endSection()</code> in a try/finally — same as Kotlin. The <code class="language-plaintext highlighter-rouge">trace { }</code> lambda is Kotlin-only; in Java, fall back to the manual begin/end form everywhere.</p>
+
+<p><strong>R8/ProGuard stripping <code class="language-plaintext highlighter-rouge">Trace</code> calls.</strong> Aggressive minification can elide <code class="language-plaintext highlighter-rouge">Trace.beginSection</code> calls in release. For the probe loop this isn’t an issue (debug builds don’t minify), but if you instrument a release build keep <code class="language-plaintext highlighter-rouge">-keep class android.os.Trace { *; }</code> in your ProGuard rules.</p>
+
+<h2 id="the-pattern-instrument--capture--inspect--remove">The pattern: instrument → capture → inspect → remove</h2>
+
+<h3 id="1-add-the-import-and-wrap-the-suspect-block">1. Add the import and wrap the suspect block</h3>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">import</span> <span class="nn">androidx.tracing.Trace</span>      <span class="c1">// androidx.tracing:tracing-ktx — preferred</span>
+<span class="c1">// or: import android.os.Trace      // platform — works without dep but no ktx helpers</span>
+</code></pre></div></div>
+
+<p>Wrap with <code class="language-plaintext highlighter-rouge">traceSection</code> (idiomatic) or manual <code class="language-plaintext highlighter-rouge">begin/end</code>:</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">import</span> <span class="nn">androidx.tracing.trace</span>
+
+<span class="nf">trace</span><span class="p">(</span><span class="s">"AGENT_TRACE_a4f9c2e1.fetchUser"</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">val</span> <span class="py">user</span> <span class="p">=</span> <span class="n">repository</span><span class="p">.</span><span class="nf">fetchUser</span><span class="p">(</span><span class="n">id</span><span class="p">)</span>
+    <span class="n">cache</span><span class="p">.</span><span class="nf">put</span><span class="p">(</span><span class="n">id</span><span class="p">,</span> <span class="n">user</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>The label format <code class="language-plaintext highlighter-rouge">AGENT_TRACE_&lt;id&gt;.&lt;name&gt;</code> keeps the sentinel prefix for cleanup grep, with a human label for the trace UI.</p>
+
+<p>For begin/end style (when wrapping isn’t ergonomic, e.g. across coroutine boundaries):</p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nc">Trace</span><span class="p">.</span><span class="nf">beginSection</span><span class="p">(</span><span class="s">"AGENT_TRACE_a4f9c2e1.fetchUser"</span><span class="p">)</span>
+<span class="k">try</span> <span class="p">{</span>
+    <span class="kd">val</span> <span class="py">user</span> <span class="p">=</span> <span class="n">repository</span><span class="p">.</span><span class="nf">fetchUser</span><span class="p">(</span><span class="n">id</span><span class="p">)</span>
+    <span class="c1">// ...</span>
+<span class="p">}</span> <span class="k">finally</span> <span class="p">{</span>
+    <span class="nc">Trace</span><span class="p">.</span><span class="nf">endSection</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Always pair <code class="language-plaintext highlighter-rouge">begin</code> with <code class="language-plaintext highlighter-rouge">end</code> in <code class="language-plaintext highlighter-rouge">finally</code>.</strong> A missing <code class="language-plaintext highlighter-rouge">endSection</code> corrupts the trace for the rest of the process.</p>
+
+<h3 id="2-capture-a-perfetto-trace-and-analyze-it">2. Capture a Perfetto trace and analyze it</h3>
+
+<p>Capturing the trace and querying it are separate concerns — covered by dedicated skills:</p>
+
+<ul>
+  <li><strong><code class="language-plaintext highlighter-rouge">android-perfetto-capture</code></strong> — strategies (one-shot host script, on-device long-running, in-app start/stop), data-source selection, capture verification</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">android-perfetto-analyze</code></strong> — <code class="language-plaintext highlighter-rouge">trace_processor</code> SQL recipes, including the slice-by-thread query you’ll want for <code class="language-plaintext highlighter-rouge">AGENT_TRACE_*</code> markers</li>
+</ul>
+
+<p>The minimum viable loop, with the sentinel-aware slice query baked in:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 1. Capture (see android-perfetto-capture for strategy detail)</span>
+/tmp/record_android_trace <span class="nt">-o</span> /tmp/trace.perfetto-trace <span class="nt">-t</span> 10s <span class="nt">-b</span> 32mb <span class="se">\</span>
+    <span class="nt">-a</span> com.example.app sched freq am wm gfx view binder_driver dalvik &amp;
+<span class="nv">CAPTURE_PID</span><span class="o">=</span><span class="nv">$!</span>
+<span class="nb">sleep </span>2
+adb shell input tap 540 1200          <span class="c"># drive the suspect flow</span>
+<span class="nb">sleep </span>6
+<span class="nb">wait</span> <span class="nv">$CAPTURE_PID</span>
+
+<span class="c"># 2. Query for your sentinel slices (see android-perfetto-analyze Recipe 1)</span>
+/tmp/trace_processor /tmp/trace.perfetto-trace <span class="nt">-q</span> - <span class="o">&lt;&lt;</span><span class="sh">'</span><span class="no">SQL</span><span class="sh">' &gt; /tmp/trace-results.txt
+SELECT
+  s.name,
+  s.ts,
+  s.dur / 1e6 AS dur_ms,
+  COALESCE(t.name, 'process/async') AS thread_name
+FROM slice s
+LEFT JOIN thread_track tt ON s.track_id = tt.id
+LEFT JOIN thread t ON tt.utid = t.utid
+WHERE s.name LIKE 'AGENT_TRACE_%'
+ORDER BY s.ts;
+</span><span class="no">SQL
+</span></code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">LEFT JOIN</code> is required: slices wrapped across coroutine <code class="language-plaintext highlighter-rouge">withContext</code> boundaries land on async tracks, not thread tracks, and an inner join would silently drop them.</p>
+
+<h3 id="3-delegate-the-verdict">3. Delegate the verdict</h3>
+
+<p>Hand the (small) result file to a Sonnet sub-agent:</p>
+
+<blockquote>
+  <p>Read <code class="language-plaintext highlighter-rouge">/tmp/trace-results.txt</code>. For each AGENT_TRACE slice, return <code class="language-plaintext highlighter-rouge">&lt;label&gt;: &lt;dur_ms&gt;ms on &lt;thread_name&gt;</code>. Flag any slice on <code class="language-plaintext highlighter-rouge">main</code> longer than 16ms. Under 60 words. <code class="language-plaintext highlighter-rouge">model: "sonnet"</code>.</p>
+</blockquote>
+
+<p>For frame-budget questions, jank attribution, or main-thread breakdowns, see <code class="language-plaintext highlighter-rouge">android-perfetto-analyze</code> Recipes 2–4.</p>
+
+<h3 id="4-cleanup-gate-blocking">4. Cleanup gate (BLOCKING)</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rg <span class="s1">'AGENT_TRACE_'</span>
+</code></pre></div></div>
+
+<p>Must return zero. Remove every wrapping <code class="language-plaintext highlighter-rouge">trace { }</code> block, every <code class="language-plaintext highlighter-rouge">Trace.beginSection</code>/<code class="language-plaintext highlighter-rouge">endSection</code> pair, and any imports that were added only for tracing.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">rm</span> <span class="nt">-f</span> /tmp/trace.perfetto-trace /tmp/trace-results.txt
+</code></pre></div></div>
+
+<p>If the project already had production trace sections (legitimate, named with the team’s convention), don’t touch those — only the <code class="language-plaintext highlighter-rouge">AGENT_TRACE_</code> ones.</p>
+
+<h2 id="common-patterns">Common patterns</h2>
+
+<p><strong>Suspect Composable recomposition cost:</strong></p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nd">@Composable</span>
+<span class="k">fun</span> <span class="nf">ExpensiveItem</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="nc">Item</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">androidx</span><span class="p">.</span><span class="n">tracing</span><span class="p">.</span><span class="nf">trace</span><span class="p">(</span><span class="s">"AGENT_TRACE_a4f9c2e1.ExpensiveItem"</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// ... composable body ...</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><strong>Coroutine block suspected of running on main:</strong></p>
+
+<div class="language-kotlin highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">viewModelScope</span><span class="p">.</span><span class="nf">launch</span> <span class="p">{</span>
+    <span class="nc">Trace</span><span class="p">.</span><span class="nf">beginSection</span><span class="p">(</span><span class="s">"AGENT_TRACE_a4f9c2e1.fetchAndCache.before-withContext"</span><span class="p">)</span>
+    <span class="c1">// ...</span>
+    <span class="nc">Trace</span><span class="p">.</span><span class="nf">endSection</span><span class="p">()</span>
+
+    <span class="nf">withContext</span><span class="p">(</span><span class="nc">Dispatchers</span><span class="p">.</span><span class="nc">IO</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nc">Trace</span><span class="p">.</span><span class="nf">beginSection</span><span class="p">(</span><span class="s">"AGENT_TRACE_a4f9c2e1.fetchAndCache.io-block"</span><span class="p">)</span>
+        <span class="k">try</span> <span class="p">{</span>
+            <span class="c1">// ...</span>
+        <span class="p">}</span> <span class="k">finally</span> <span class="p">{</span>
+            <span class="nc">Trace</span><span class="p">.</span><span class="nf">endSection</span><span class="p">()</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>If the <code class="language-plaintext highlighter-rouge">io-block</code> slice lands on the <code class="language-plaintext highlighter-rouge">main</code> lane, your dispatcher is misconfigured.</p>
+
+<h2 id="common-mistakes">Common mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Skipping the cleanup gate</td>
+      <td><code class="language-plaintext highlighter-rouge">rg 'AGENT_TRACE_'</code> must return zero before commit</td>
+    </tr>
+    <tr>
+      <td>Missing <code class="language-plaintext highlighter-rouge">endSection</code> in <code class="language-plaintext highlighter-rouge">try/finally</code></td>
+      <td>Pairs must always close — use <code class="language-plaintext highlighter-rouge">trace { }</code> lambda form when possible</td>
+    </tr>
+    <tr>
+      <td>Generic label like <code class="language-plaintext highlighter-rouge">"work"</code></td>
+      <td>Use <code class="language-plaintext highlighter-rouge">AGENT_TRACE_&lt;id&gt;.&lt;name&gt;</code> so it’s unique in the UI and greppable for cleanup</td>
+    </tr>
+    <tr>
+      <td>Confusing slice duration with thread time</td>
+      <td>Default <code class="language-plaintext highlighter-rouge">dur</code> is wall time; for CPU time use <code class="language-plaintext highlighter-rouge">tts</code> (thread timestamp) columns</td>
+    </tr>
+    <tr>
+      <td>Wrapping the wrong block</td>
+      <td>Sections need to bracket the work — wrap the call, not just its declaration</td>
+    </tr>
+    <tr>
+      <td>Inner JOIN on <code class="language-plaintext highlighter-rouge">thread_track</code> when querying</td>
+      <td>Async slices have no thread; use <code class="language-plaintext highlighter-rouge">LEFT JOIN</code> (see <code class="language-plaintext highlighter-rouge">android-perfetto-analyze</code>)</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>For the capture-side equivalents (no <code class="language-plaintext highlighter-rouge">-a</code> filter, buffer too small, didn’t drive the flow during the window) see <code class="language-plaintext highlighter-rouge">android-perfetto-capture</code>.</p>

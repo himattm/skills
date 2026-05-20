@@ -1,0 +1,192 @@
+<p>Turn a code snippet into a syntax-highlighted image. The default renderer is <a href="https://ray.so">ray.so</a> — it builds the image from a URL fragment, so the flow is: build the URL, copy it to the clipboard, and optionally screenshot the rendered page to a PNG. <a href="https://carbon.now.sh">carbon.now.sh</a> works the same way and is a drop-in alternative if the user prefers it.</p>
+
+<blockquote>
+  <p>macOS-only: this skill uses <code class="language-plaintext highlighter-rouge">pbpaste</code>, <code class="language-plaintext highlighter-rouge">pbcopy</code>, and <code class="language-plaintext highlighter-rouge">osascript</code>. On Linux, swap in <code class="language-plaintext highlighter-rouge">xclip</code>/<code class="language-plaintext highlighter-rouge">wl-copy</code> or skip the clipboard steps.</p>
+</blockquote>
+
+<h2 id="inputs">Inputs</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Parameter</th>
+      <th>Default</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">code</code></td>
+      <td>required</td>
+      <td>A fenced code block in the user’s message, an <code class="language-plaintext highlighter-rouge">@path/to/file</code> they mention, the clipboard (if they say so), or inline text in their request</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">theme</code></td>
+      <td><code class="language-plaintext highlighter-rouge">candy</code></td>
+      <td>See themes below</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">padding</code></td>
+      <td><code class="language-plaintext highlighter-rouge">64</code></td>
+      <td><code class="language-plaintext highlighter-rouge">16</code>, <code class="language-plaintext highlighter-rouge">32</code>, <code class="language-plaintext highlighter-rouge">64</code>, or <code class="language-plaintext highlighter-rouge">128</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">darkMode</code></td>
+      <td><code class="language-plaintext highlighter-rouge">true</code></td>
+      <td><code class="language-plaintext highlighter-rouge">true</code> or <code class="language-plaintext highlighter-rouge">false</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">background</code></td>
+      <td><code class="language-plaintext highlighter-rouge">true</code></td>
+      <td><code class="language-plaintext highlighter-rouge">true</code> or <code class="language-plaintext highlighter-rouge">false</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">language</code></td>
+      <td>auto-detect</td>
+      <td>See languages below</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>If the user provides just the code with no flags, use the defaults. If they want to pick a theme or language but don’t know what’s available, show a short list from the tables below and let them choose.</p>
+
+<h2 id="workflow">Workflow</h2>
+
+<h3 id="1-resolve-the-code-source">1. Resolve the code source</h3>
+
+<ul>
+  <li>A fenced code block in the user’s message → extract the body and language hint</li>
+  <li>An <code class="language-plaintext highlighter-rouge">@path/to/file</code> they mention → read that file</li>
+  <li>“Use the clipboard” or similar → <code class="language-plaintext highlighter-rouge">pbpaste</code></li>
+  <li>Inline code in the request → use it directly</li>
+</ul>
+
+<h3 id="2-detect-the-language-if-not-specified">2. Detect the language (if not specified)</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Source</th>
+      <th>Rule</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>File path</td>
+      <td>Map by extension (<code class="language-plaintext highlighter-rouge">.py</code> → <code class="language-plaintext highlighter-rouge">python</code>, <code class="language-plaintext highlighter-rouge">.ts</code> → <code class="language-plaintext highlighter-rouge">typescript</code>, <code class="language-plaintext highlighter-rouge">.kt</code> → <code class="language-plaintext highlighter-rouge">kotlin</code>, etc.)</td>
+    </tr>
+    <tr>
+      <td>Fenced block with language hint</td>
+      <td>Use the hint</td>
+    </tr>
+    <tr>
+      <td>Shebang or shell-like start (<code class="language-plaintext highlighter-rouge">gh </code>, <code class="language-plaintext highlighter-rouge">git </code>, <code class="language-plaintext highlighter-rouge">npm </code>, <code class="language-plaintext highlighter-rouge">pnpm </code>, <code class="language-plaintext highlighter-rouge">bun </code>, <code class="language-plaintext highlighter-rouge">./gradlew </code>, <code class="language-plaintext highlighter-rouge">/plugin</code>)</td>
+      <td><code class="language-plaintext highlighter-rouge">bash</code></td>
+    </tr>
+    <tr>
+      <td>Syntax cues</td>
+      <td><code class="language-plaintext highlighter-rouge">fun </code> + <code class="language-plaintext highlighter-rouge">{</code> → <code class="language-plaintext highlighter-rouge">kotlin</code>, <code class="language-plaintext highlighter-rouge">def </code> → <code class="language-plaintext highlighter-rouge">python</code></td>
+    </tr>
+    <tr>
+      <td>Otherwise</td>
+      <td><code class="language-plaintext highlighter-rouge">auto</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="3-build-the-url">3. Build the URL</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>build_ray_so_url<span class="o">()</span> <span class="o">{</span>
+  <span class="nb">local </span><span class="nv">code</span><span class="o">=</span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span> <span class="nv">theme</span><span class="o">=</span><span class="s2">"</span><span class="k">${</span><span class="nv">2</span><span class="k">:-</span><span class="nv">candy</span><span class="k">}</span><span class="s2">"</span> <span class="nv">padding</span><span class="o">=</span><span class="s2">"</span><span class="k">${</span><span class="nv">3</span><span class="k">:-</span><span class="nv">64</span><span class="k">}</span><span class="s2">"</span> <span class="nv">dark</span><span class="o">=</span><span class="s2">"</span><span class="k">${</span><span class="nv">4</span><span class="k">:-</span><span class="nv">true</span><span class="k">}</span><span class="s2">"</span> <span class="nb">bg</span><span class="o">=</span><span class="s2">"</span><span class="k">${</span><span class="nv">5</span><span class="k">:-</span><span class="nv">true</span><span class="k">}</span><span class="s2">"</span> <span class="nv">lang</span><span class="o">=</span><span class="s2">"</span><span class="k">${</span><span class="nv">6</span><span class="k">:-</span><span class="nv">auto</span><span class="k">}</span><span class="s2">"</span>
+  <span class="nb">local </span>b64
+  <span class="nv">b64</span><span class="o">=</span><span class="si">$(</span><span class="nb">printf</span> %s <span class="s2">"</span><span class="nv">$code</span><span class="s2">"</span> | <span class="nb">base64</span> | <span class="nb">tr</span> <span class="nt">-d</span> <span class="s1">'\n'</span><span class="si">)</span>
+  <span class="nv">b64</span><span class="o">=</span><span class="s2">"</span><span class="k">${</span><span class="nv">b64</span><span class="p">//+/%2B</span><span class="k">}</span><span class="s2">"</span><span class="p">;</span> <span class="nv">b64</span><span class="o">=</span><span class="s2">"</span><span class="k">${</span><span class="nv">b64</span><span class="p">//\//%2F</span><span class="k">}</span><span class="s2">"</span><span class="p">;</span> <span class="nv">b64</span><span class="o">=</span><span class="s2">"</span><span class="k">${</span><span class="nv">b64</span><span class="p">//=/%3D</span><span class="k">}</span><span class="s2">"</span>
+  <span class="nb">printf</span> <span class="s1">'https://ray.so/#code=%s&amp;theme=%s&amp;padding=%s&amp;darkMode=%s&amp;background=%s&amp;language=%s\n'</span> <span class="se">\</span>
+    <span class="s2">"</span><span class="nv">$b64</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$theme</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$padding</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$dark</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$bg</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$lang</span><span class="s2">"</span>
+<span class="o">}</span>
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">code</code> fragment is base64 of the literal bytes (newlines included). <code class="language-plaintext highlighter-rouge">+</code>, <code class="language-plaintext highlighter-rouge">/</code>, and <code class="language-plaintext highlighter-rouge">=</code> are percent-encoded so the fragment survives messengers and chat clients that re-encode URLs.</p>
+
+<h3 id="4-print--copy-url-to-the-clipboard">4. Print + copy URL to the clipboard</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nv">URL</span><span class="o">=</span><span class="si">$(</span>build_ray_so_url <span class="s2">"</span><span class="nv">$code</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$theme</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$padding</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$dark</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$bg</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$lang</span><span class="s2">"</span><span class="si">)</span>
+<span class="nb">printf</span> <span class="s1">'%s\n'</span> <span class="s2">"</span><span class="nv">$URL</span><span class="s2">"</span>
+<span class="nb">printf</span> <span class="s1">'%s'</span> <span class="s2">"</span><span class="nv">$URL</span><span class="s2">"</span> | pbcopy
+</code></pre></div></div>
+
+<p>Always print the URL even when copying — useful for logs and for the user to inspect.</p>
+
+<h3 id="5-optional-render-the-png">5. (Optional) Render the PNG</h3>
+
+<p>If the user asks for the image (e.g. “with image”, “render the png”, “as a screenshot”), use the playwright MCP tools (<code class="language-plaintext highlighter-rouge">mcp__plugin_playwright_playwright__*</code>):</p>
+
+<ol>
+  <li><code class="language-plaintext highlighter-rouge">browser_navigate</code> to the URL</li>
+  <li><code class="language-plaintext highlighter-rouge">browser_snapshot</code> once to confirm the code-frame selector for the current ray.so build (look for the rendered code container — historically <code class="language-plaintext highlighter-rouge">[data-element="frame"]</code> or the wrapper around the syntax-highlighted code)</li>
+  <li><code class="language-plaintext highlighter-rouge">browser_wait_for</code> until that element is visible and fonts have settled (a short text-presence check on the rendered code is more reliable than a fixed timeout)</li>
+  <li><code class="language-plaintext highlighter-rouge">browser_take_screenshot</code> scoped to that element, saving to <code class="language-plaintext highlighter-rouge">~/Downloads/code-image-&lt;timestamp&gt;.png</code></li>
+  <li>Verify the file is non-empty and at least ~10KB — anything smaller suggests a blank or timing-failed render</li>
+  <li>Report the saved absolute path</li>
+</ol>
+
+<p>To copy the PNG to the clipboard on macOS:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>osascript <span class="nt">-e</span> <span class="s2">"set the clipboard to (read (POSIX file </span><span class="se">\"</span><span class="nv">$path</span><span class="se">\"</span><span class="s2">) as «class PNGf»)"</span>
+</code></pre></div></div>
+
+<p>If the selector has shifted since this skill was written, fall back to a full-page screenshot at a fixed viewport (e.g. <code class="language-plaintext highlighter-rouge">1280x800</code>) and use the whole image.</p>
+
+<h2 id="themes-common">Themes (common)</h2>
+
+<p>candy, breeze, crimson, falcon, meadow, midnight, raindrop, sunset, vercel, supabase, bitmap, noir, ice, sand, forest, tailwind</p>
+
+<h2 id="languages-common">Languages (common)</h2>
+
+<p>auto, bash, shell, javascript, typescript, jsx, tsx, python, ruby, go, rust, kotlin, swift, java, c, cpp, csharp, php, html, css, scss, sql, json, yaml, toml, markdown, dockerfile, plaintext</p>
+
+<h2 id="padding">Padding</h2>
+
+<p>16, 32, 64, 128</p>
+
+<h2 id="examples">Examples</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Default theme/padding, language auto-detected from extension</span>
+build_ray_so_url <span class="s2">"</span><span class="si">$(</span><span class="nb">cat </span>hello.py<span class="si">)</span><span class="s2">"</span> candy 64 <span class="nb">true true </span>python
+
+<span class="c"># Shell snippet, dark vercel theme, no background</span>
+build_ray_so_url <span class="s2">"</span><span class="si">$(</span>pbpaste<span class="si">)</span><span class="s2">"</span> vercel 32 <span class="nb">true false </span>bash
+</code></pre></div></div>
+
+<h2 id="common-mistakes">Common Mistakes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Mistake</th>
+      <th>Fix</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Forgetting to strip newlines from <code class="language-plaintext highlighter-rouge">base64</code> output</td>
+      <td>macOS <code class="language-plaintext highlighter-rouge">base64</code> doesn’t wrap by default for stdin, but pipe through <code class="language-plaintext highlighter-rouge">tr -d '\n'</code> to be safe</td>
+    </tr>
+    <tr>
+      <td>Leaving <code class="language-plaintext highlighter-rouge">+</code> <code class="language-plaintext highlighter-rouge">/</code> <code class="language-plaintext highlighter-rouge">=</code> un-encoded in the fragment</td>
+      <td>Messengers and chat clients re-encode URLs and can mangle the fragment — always percent-encode</td>
+    </tr>
+    <tr>
+      <td>Using <code class="language-plaintext highlighter-rouge">echo "$code" | base64</code> (adds a trailing newline)</td>
+      <td>Use <code class="language-plaintext highlighter-rouge">printf %s "$code" | base64</code></td>
+    </tr>
+    <tr>
+      <td>Hard-coding a selector for the screenshot</td>
+      <td>Confirm the selector with <code class="language-plaintext highlighter-rouge">browser_snapshot</code> on the live page each run; ray.so’s DOM can shift between releases</td>
+    </tr>
+    <tr>
+      <td>Reporting success without checking the PNG</td>
+      <td>Verify file size &gt; ~10KB before claiming the render worked</td>
+    </tr>
+  </tbody>
+</table>

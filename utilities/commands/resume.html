@@ -1,0 +1,31 @@
+<p>Pick up work from the most recent <code class="language-plaintext highlighter-rouge">/checkpoint</code> written in this repo.</p>
+
+<h2 id="procedure">Procedure</h2>
+
+<ol>
+  <li><strong>Find checkpoints.</strong> Run <code class="language-plaintext highlighter-rouge">ls -1t .claude/checkpoints/*.md 2&gt;/dev/null | head -3</code> from the working directory.
+    <ul>
+      <li>If no files (directory missing or empty), tell the user: <code class="language-plaintext highlighter-rouge">No checkpoints found in .claude/checkpoints/. Run /checkpoint to create one.</code> Then stop.</li>
+      <li>If exactly one file, use it without asking.</li>
+      <li>If multiple, default to the newest. Show the 3 newest with their <code class="language-plaintext highlighter-rouge">created</code> timestamps and titles (read frontmatter), and ask the user to confirm or pick a different one — only if the difference matters (e.g., the second-newest is on a different branch). Otherwise just take the newest silently.</li>
+    </ul>
+  </li>
+  <li>
+    <p><strong>Read the chosen checkpoint</strong> with the Read tool.</p>
+  </li>
+  <li>
+    <p><strong>Summarize in 2 lines max:</strong> “Resuming <code class="language-plaintext highlighter-rouge">&lt;title&gt;</code> (checkpointed &lt;relative time, e.g. ‘2 hours ago’&gt;). Next step: <one-line restatement="" of="" Next="" concrete="" step="">."</one-line></p>
+  </li>
+  <li>
+    <p><strong>Begin the work.</strong> Act on the “Next concrete step” section. Use the “Files touched” list to know what’s already in flight. Treat “Blockers / open questions” as things to surface immediately if they re-occur, not as things to solve from scratch.</p>
+  </li>
+  <li><strong>Do not</strong> re-plan, re-explore the repo, or interrogate the user — the checkpoint is the source of truth. If something in the checkpoint is genuinely ambiguous, ask one focused question and continue.</li>
+</ol>
+
+<h2 id="notes">Notes</h2>
+
+<ul>
+  <li>Per-repo isolation: only look in the current working directory’s <code class="language-plaintext highlighter-rouge">.claude/checkpoints/</code>. Don’t scan globally.</li>
+  <li>The checkpoint file might be from a different model session entirely — trust it the same way you’d trust a teammate’s handoff doc.</li>
+  <li>If the checkpoint references files that no longer exist (deleted, branch switched), surface that and ask the user how to proceed before doing work that would fail.</li>
+</ul>
