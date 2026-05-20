@@ -13,7 +13,7 @@
         "name": "Matt Mckenna"
       },
       "category": "development",
-      "source": "./plugins/android",
+      "source": "./android",
       "homepage": "https://github.com/himattm/skills"
     },
     {
@@ -23,7 +23,7 @@
         "name": "Matt Mckenna"
       },
       "category": "development",
-      "source": "./plugins/review",
+      "source": "./review",
       "homepage": "https://github.com/himattm/skills"
     },
     {
@@ -33,7 +33,7 @@
         "name": "Matt Mckenna"
       },
       "category": "utilities",
-      "source": "./plugins/utilities",
+      "source": "./utilities",
       "homepage": "https://github.com/himattm/skills"
     }
   ]
